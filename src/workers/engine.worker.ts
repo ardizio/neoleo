@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 // Conjunction screening engine: builds the demo scenario, verifies the
 // pairs announced by incoming CDMs, then sweeps the full catalog.
-import { CATALOG_URL, parseCatalog, type CatalogSnapshot } from '../data/catalog';
+import { parseCatalog, type CatalogSnapshot } from '../data/catalog';
 import { Engine } from '../sim/engine';
 import { altitudeRange } from '../orbit/screening';
 import type { Kep } from '../orbit/kepler';
@@ -11,7 +11,7 @@ let engine: Engine | null = null;
 self.onmessage = async (ev: MessageEvent) => {
   const msg = ev.data;
   if (msg.type === 'init') {
-    const snap = (await (await fetch(CATALOG_URL)).json()) as CatalogSnapshot;
+    const snap = (await (await fetch(msg.catalogUrl)).json()) as CatalogSnapshot;
     engine = new Engine(parseCatalog(snap), msg.t0);
     const sc = engine.build();
     if (msg.sweep === false) {

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react';
 import type { SatRec } from 'satellite.js';
-import { loadCatalog, toSatrec, type CatalogObject, type CatalogSnapshot } from '../data/catalog';
+import { CATALOG_URL, loadCatalog, toSatrec, type CatalogObject, type CatalogSnapshot } from '../data/catalog';
 import { FLEET, ORG, PARTNER_FLEET, PARTNER_ORG, type FleetSpec } from '../data/company';
 import type { Kep, State } from '../orbit/kepler';
 import { planAvoidance, postManeuverKep, type ManeuverOption, type SatBudget } from '../orbit/maneuver';
@@ -177,6 +177,8 @@ class Store {
       const { rows: _rows, ...meta } = snapshot;
       this.set({ objects, snapshot: meta, loadingStep: 'Starting SGP4 propagation' });
 
+      // Workers resolve relative URLs against their own script (/assets/), so pass an absolute one.
+      const catalogUrl = new URL(CATALOG_URL, location.href).href;
       this.propagator = new Worker(new URL('../workers/propagator.worker.ts', import.meta.url), { type: 'module' });
       this.propagator.onmessage = (ev) => {
         if (ev.data.type === 'state') {
@@ -184,14 +186,14 @@ class Store {
           this.catalogVersion++;
         } else if (ev.data.type === 'ready') this.requestPropagation();
       };
-      this.propagator.postMessage({ type: 'init' });
+      this.propagator.postMessage({ type: 'init', catalogUrl });
 
       this.set({ loadingStep: 'Building fleet ephemerides and screening' });
       const t0 = clock.now();
       const engine = new Worker(new URL('../workers/engine.worker.ts', import.meta.url), { type: 'module' });
       await new Promise<void>((resolve) => {
         engine.onmessage = (ev) => this.onEngine(ev.data, resolve);
-        engine.postMessage({ type: 'init', t0 });
+        engine.postMessage({ type: 'init', t0, catalogUrl });
       });
       this.customWorker = new Worker(new URL('../workers/engine.worker.ts', import.meta.url), { type: 'module' });
       this.customWorker.onmessage = (ev) => {
@@ -200,7 +202,7 @@ class Store {
           this.customReq.delete(ev.data.reqId);
         }
       };
-      this.customWorker.postMessage({ type: 'init', t0, sweep: false });
+      this.customWorker.postMessage({ type: 'init', t0, sweep: false, catalogUrl });
 
       this.sessionStart = Date.now();
       this.addLog('info', `Signed in as ${ORG.user.name}`, `${ORG.name} · ${FLEET.length} satellites under management`);

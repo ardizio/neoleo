@@ -2,14 +2,14 @@
 // Propagates the whole public catalog with SGP4 for the renderer.
 import type { SatRec } from 'satellite.js';
 import { propagate } from 'satellite.js';
-import { CATALOG_URL, parseCatalog, toSatrec, type CatalogSnapshot } from '../data/catalog';
+import { parseCatalog, toSatrec, type CatalogSnapshot } from '../data/catalog';
 
 let recs: (SatRec | null)[] = [];
 
 self.onmessage = async (ev: MessageEvent) => {
   const msg = ev.data;
   if (msg.type === 'init') {
-    const snap = (await (await fetch(CATALOG_URL)).json()) as CatalogSnapshot;
+    const snap = (await (await fetch(msg.catalogUrl)).json()) as CatalogSnapshot;
     recs = parseCatalog(snap).map((o) => {
       try {
         return toSatrec(o);
