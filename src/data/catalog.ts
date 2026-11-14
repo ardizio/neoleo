@@ -26,7 +26,7 @@ export interface CatalogObject {
   omm: Record<string, string | number>;
 }
 
-export const CATALOG_URL = `${import.meta.env.BASE_URL}data/catalog.json`;
+export const CATALOG_URL = `${import.meta.env.BASE_URL}data/catalog.json?v=${import.meta.env.VITE_CATALOG_VERSION}`;
 
 export async function loadCatalog(): Promise<{ snapshot: CatalogSnapshot; objects: CatalogObject[] }> {
   const res = await fetch(CATALOG_URL);
