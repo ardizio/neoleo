@@ -12,7 +12,7 @@ This repository is a **UX/UI demo**. It opens directly inside a client workspace
 
 | Part | Status |
 |---|---|
-| Public catalog (19,575 objects: 16,894 active payloads, Fengyun-1C, Cosmos-2251, Iridium-33 and Cosmos-1408 debris, ENVISAT) | **Real**: CelesTrak GP snapshot (OMM), propagated with SGP4 (`satellite.js`) |
+| Public catalog (29,338 objects: 16,894 active payloads, 10,264 debris fragments, 2,180 rocket bodies and defunct objects incl. ENVISAT) | **Real**: CelesTrak GP snapshot (OMM), propagated with SGP4 (`satellite.js`) |
 | Earth, rotation (GMST), day/night terminator (Sun position) | Real geometry |
 | Screening engine (apogee/perigee filter, range-rate sampling, golden-section TCA refinement) | Real computation, runs in a Web Worker |
 | Collision probability (2D Foster-style integral over the hard-body circle) | Real computation; the **covariances are modelled** |

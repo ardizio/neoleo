@@ -15,6 +15,9 @@ const SOURCES = [
   { file: 'iridium-33-debris.json', url: 'GROUP=iridium-33-debris', kind: 'DEBRIS' },
   { file: 'cosmos-2251-debris.json', url: 'GROUP=cosmos-2251-debris', kind: 'DEBRIS' },
   { file: 'defunct.json', url: 'CATNR=27386', kind: 'DEFUNCT' }, // ENVISAT
+  // All other cataloged fragments and spent stages (name search, no login needed).
+  { file: 'all-debris.json', url: 'NAME=DEB', kind: 'DEBRIS' },
+  { file: 'rocket-bodies.json', url: 'NAME=R/B', kind: 'DEFUNCT' },
 ];
 
 const offline = process.argv.includes('--offline');
