@@ -2,13 +2,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DObject, CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import { gstime, jday, sunPos } from 'satellite.js';
-import { drawEarthTexture } from './earthTexture';
+import { drawEarthTexture, earthOutlines, LIGHT_EARTH } from './earthTexture';
+import dayUrl from './textures/earth-day.webp';
+import nightUrl from './textures/earth-night.webp';
 import { clock, store, visibleAlerts, type AppState } from '../state/store';
-import { regimeOf, sgp4State } from '../data/catalog';
+import { objectType, regimeOf, sgp4State, shapeOf } from '../data/catalog';
 import { period, stateAt, RE, type Kep } from '../orbit/kepler';
 import type { Vec3 } from '../orbit/vec';
 import { latest } from '../sim/alerts';
 import type { Severity } from '../orbit/pc';
+import { PARTNER_ORG } from '../data/company';
 
 const SCALE = 1 / RE;
 const toWorld = (r: Vec3 | Float32Array, o = 0, out = new THREE.Vector3()) =>
@@ -26,13 +29,21 @@ export const COLORS = {
 
 const SEV_COLOR: Record<Severity, string> = { critical: '#e5383b', warning: '#f08c00', watch: '#d4a000', monitor: '#8a96a8' };
 
+// Far away every object is a dot. Close up (< ~1.8 Earth radii from the camera) each object
+// becomes a mock silhouette by type: 4 satellite designs, rocket stages, 4 debris shapes and
+// dead payloads. Dead objects tumble. Shape variant comes from the NORAD number (aVar).
 const pointsVertex = /* glsl */ `
   attribute vec3 aVel;
   attribute vec3 aColor;
   attribute float aSize;
+  attribute float aKind;
+  attribute float aVar;
   uniform float uDt;
   uniform float uPx;
   varying vec3 vColor;
+  varying float vNear;
+  varying float vKind;
+  varying float vVar;
   void main() {
     vec3 p = position;
     float rm = length(p);
@@ -41,22 +52,76 @@ const pointsVertex = /* glsl */ `
     vec3 w = vec3(r.x, r.z, -r.y) * ${SCALE.toFixed(12)};
     vec4 mv = modelViewMatrix * vec4(w, 1.0);
     gl_Position = projectionMatrix * mv;
-    float att = clamp(3.4 / -mv.z, 0.6, 1.7);
-    gl_PointSize = aSize * uPx * att;
+    float dist = -mv.z;
+    vNear = 1.0 - smoothstep(0.9, 1.8, dist);
+    float far = clamp(3.4 / dist, 0.6, 1.7);
+    float near = clamp(4.2 / dist, 3.0, 16.0);
+    gl_PointSize = aSize * uPx * mix(far, near, vNear);
     vColor = aColor;
+    vKind = aKind;
+    vVar = aVar;
   }
 `;
 const pointsFragment = /* glsl */ `
+  uniform float uTime;
   varying vec3 vColor;
+  varying float vNear;
+  varying float vKind;
+  varying float vVar;
+  float box(vec2 p, vec2 b) { vec2 d = abs(p) - b; return max(d.x, d.y); }
+  float circ(vec2 p, float r) { return length(p) - r; }
+  vec2 rot(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
+  // Returns signed distance; .y of the result picks a darker "panel" tone.
+  vec2 satellite(vec2 c, float v) {
+    float body, panel;
+    if (v < 0.5) {            // classic bus + two wings
+      body = box(c, vec2(0.09, 0.09));
+      panel = box(vec2(abs(c.x) - 0.31, c.y), vec2(0.15, 0.07));
+      body = min(body, box(c, vec2(0.18, 0.01)));
+    } else if (v < 1.5) {     // cubesat with one long deployable array
+      body = box(c, vec2(0.07, 0.1));
+      panel = box(c - vec2(0.27, 0.0), vec2(0.19, 0.05));
+    } else if (v < 2.5) {     // comsat: bus, dish, short wings
+      body = min(box(c, vec2(0.1, 0.1)), abs(circ(c - vec2(0.0, 0.2), 0.09)) - 0.022);
+      panel = box(vec2(abs(c.x) - 0.26, c.y + 0.02), vec2(0.12, 0.06));
+    } else {                  // large platform, four arrays in a cross
+      body = box(c, vec2(0.1, 0.1));
+      panel = min(box(vec2(abs(c.x) - 0.28, c.y), vec2(0.15, 0.055)), box(vec2(c.x, abs(c.y) - 0.28), vec2(0.055, 0.15)));
+    }
+    return vec2(min(body, panel), panel < body ? 1.0 : 0.0);
+  }
+  vec2 rocket(vec2 c, float v) {
+    float len = 0.30 + 0.06 * v;
+    float tank = box(c, vec2(0.075, len));
+    float nozzle = box(c - vec2(0.0, -len - 0.05), vec2(0.04 + (c.y + len) * -0.5, 0.05));
+    float band = box(c - vec2(0.0, len * 0.35), vec2(0.08, 0.012));
+    return vec2(min(tank, nozzle), band < 0.0 || nozzle < 0.0 ? 1.0 : 0.0);
+  }
+  vec2 debris(vec2 c, float v) {
+    if (v < 0.5) return vec2(abs(c.x) * 1.6 + abs(c.y) * 0.9 + c.x * c.y * 2.0 - 0.17, 0.0);           // shard
+    if (v < 1.5) return vec2(box(c, vec2(0.26, 0.035)), 1.0);                                            // panel strip
+    if (v < 2.5) return vec2(min(circ(c, 0.09), min(circ(c - vec2(0.15, 0.08), 0.06), circ(c + vec2(0.13, 0.1), 0.05))), 0.0); // cluster
+    return vec2(max(max(-c.y - 0.12, c.y - c.x * 1.7 - 0.12), c.y + c.x * 1.7 - 0.12), 1.0);            // triangle chunk
+  }
   void main() {
     vec2 c = gl_PointCoord - 0.5;
-    float d = length(c);
-    float a = 1.0 - smoothstep(0.38, 0.5, d);
+    float disc = 1.0 - smoothstep(0.38, 0.5, length(c));
+    float spin = vKind < 0.5 ? 0.6 : vVar * 1.7 + uTime * (0.25 + 0.1 * vVar);
+    vec2 q = rot(c, spin);
+    vec2 g;
+    if (vKind < 0.5) g = satellite(q, vVar);
+    else if (vKind < 1.5) g = debris(q, vVar);
+    else if (vKind < 2.5) g = satellite(q * 1.2, mod(vVar, 2.0));
+    else g = rocket(q, vVar);
+    float glyph = 1.0 - smoothstep(-0.012, 0.012, g.x);
+    float edge = smoothstep(-0.035, -0.012, g.x) * glyph;
+    vec3 col = vColor * mix(1.0, 0.6, g.y * vNear);
+    col = mix(col, vec3(1.0), edge * 0.35 * vNear);
+    float a = mix(disc, glyph, vNear);
     if (a < 0.02) discard;
-    gl_FragColor = vec4(vColor, a * 0.9);
+    gl_FragColor = vec4(col, a * 0.92);
   }
 `;
-
 const fleetVertex = /* glsl */ `
   attribute vec3 aColor;
   attribute float aSize;
@@ -125,6 +190,34 @@ const earthFragment = /* glsl */ `
     gl_FragColor = vec4(col, 1.0);
   }
 `;
+// Photoreal: NASA Blue Marble by day, Black Marble city lights by night, sun glint on oceans.
+const photoFragment = /* glsl */ `
+  uniform sampler2D uDay;
+  uniform sampler2D uNight;
+  uniform sampler2D uLand;
+  uniform vec3 uSun;
+  varying vec2 vUv;
+  varying vec3 vNormalW;
+  varying vec3 vViewDir;
+  void main() {
+    vec3 n = normalize(vNormalW);
+    vec3 l = normalize(uSun);
+    vec3 v = normalize(vViewDir);
+    float ndl = dot(n, l);
+    float day = smoothstep(-0.10, 0.20, ndl);
+    vec3 dayCol = texture2D(uDay, vUv).rgb * (0.30 + 0.85 * clamp(ndl + 0.2, 0.0, 1.0));
+    vec3 lights = texture2D(uNight, vUv).rgb;
+    vec3 nightCol = dayCol * 0.05 + lights * vec3(1.0, 0.80, 0.52) * 1.4;
+    vec3 col = mix(nightCol, dayCol, day);
+    float ocean = 1.0 - texture2D(uLand, vUv).r;
+    float spec = pow(max(dot(n, normalize(l + v)), 0.0), 160.0);
+    col += vec3(0.95, 0.90, 0.80) * spec * 0.35 * ocean * day;
+    float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
+    col = mix(col, vec3(0.32, 0.58, 1.0), fres * 0.55 * smoothstep(-0.3, 0.3, ndl));
+    gl_FragColor = vec4(col, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
 const atmoFragment = /* glsl */ `
   varying vec3 vNormalW;
   varying vec3 vViewDir;
@@ -149,6 +242,9 @@ export class GlobeScene {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   earth: THREE.Mesh;
+  private mapMat: THREE.ShaderMaterial;
+  private outlines: THREE.Group;
+  private photoMat: THREE.ShaderMaterial | null = null;
   earthGroup = new THREE.Group();
   sunUniform = new THREE.Vector3(1, 0, 0);
   points!: THREE.Points;
@@ -164,6 +260,7 @@ export class GlobeScene {
   tcaMarker: THREE.Sprite;
   tooltip: HTMLDivElement;
   private lastVersion = -1;
+  private lastSpeed = 1;
   private lastRequest = 0;
   private catalogT = 0;
   private raf = 0;
@@ -207,14 +304,16 @@ export class GlobeScene {
     });
 
     // Earth
-    const tex = new THREE.CanvasTexture(drawEarthTexture(4096));
+    // Coast/border strokes come from vector lines (buildOutlines); the texture is fill only.
+    const big = this.renderer.capabilities.maxTextureSize >= 8192 && !matchMedia('(max-width: 760px)').matches;
+    const tex = new THREE.CanvasTexture(drawEarthTexture(big ? 8192 : 4096, { ...LIGHT_EARTH, border: 'rgba(0,0,0,0)', coast: 'rgba(0,0,0,0)' }));
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
-    this.earth = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 160, 120),
-      new THREE.ShaderMaterial({ uniforms: { uMap: { value: tex }, uSun: { value: this.sunUniform } }, vertexShader: earthVertex, fragmentShader: earthFragment }),
-    );
+    this.mapMat = new THREE.ShaderMaterial({ uniforms: { uMap: { value: tex }, uSun: { value: this.sunUniform } }, vertexShader: earthVertex, fragmentShader: earthFragment });
+    this.earth = new THREE.Mesh(new THREE.SphereGeometry(1, 160, 120), this.mapMat);
     this.earthGroup.add(this.earth);
+    this.outlines = this.buildOutlines();
+    this.earthGroup.add(this.outlines);
     this.scene.add(this.earthGroup);
     const atmo = new THREE.Mesh(
       new THREE.SphereGeometry(1.07, 96, 64),
@@ -224,7 +323,7 @@ export class GlobeScene {
 
     // Catalog points
     this.pointsMat = new THREE.ShaderMaterial({
-      uniforms: { uDt: { value: 0 }, uPx: { value: this.renderer.getPixelRatio() } },
+      uniforms: { uDt: { value: 0 }, uPx: { value: this.renderer.getPixelRatio() }, uTime: { value: 0 } },
       vertexShader: pointsVertex,
       fragmentShader: pointsFragment,
       transparent: true,
@@ -307,7 +406,53 @@ export class GlobeScene {
     this.renderer.setSize(w, h);
     this.labelRenderer.setSize(w, h);
     this.camera.aspect = w / Math.max(1, h);
+    // Portrait (phones): keep the 38° framing horizontally so the globe is not cropped at the sides.
+    const a = this.camera.aspect;
+    this.camera.fov = a >= 1 ? 38 : Math.min(70, (2 * Math.atan(Math.tan((19 * Math.PI) / 180) / a) * 180) / Math.PI);
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Vector coastlines + borders in the same frame as the sphere's equirectangular UVs. */
+  private buildOutlines() {
+    const { coast, borders } = earthOutlines();
+    const R = 1.0006;
+    const seg = (lines: number[][][]) => {
+      const pts: number[] = [];
+      for (const line of lines) {
+        for (let k = 1; k < line.length; k++) {
+          for (const [lon, lat] of [line[k - 1], line[k]]) {
+            const phi = ((lon + 180) * Math.PI) / 180, la = (lat * Math.PI) / 180;
+            pts.push(-Math.cos(phi) * Math.cos(la) * R, Math.sin(la) * R, Math.sin(phi) * Math.cos(la) * R);
+          }
+        }
+      }
+      return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    };
+    const g = new THREE.Group();
+    g.add(new THREE.LineSegments(seg(coast), new THREE.LineBasicMaterial({ color: '#97a8be' })));
+    g.add(new THREE.LineSegments(seg(borders), new THREE.LineBasicMaterial({ color: '#c3cdda' })));
+    return g;
+  }
+
+  /** Built on first use so map-only sessions never download the imagery. */
+  private photoMaterial() {
+    if (this.photoMat) return this.photoMat;
+    const load = (url: string) => {
+      const t = new THREE.TextureLoader().load(url);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+      return t;
+    };
+    // Land mask from the same Natural Earth outlines: white land, black ocean (drives sun glint).
+    const land = new THREE.CanvasTexture(
+      drawEarthTexture(2048, { ocean: '#000', land: '#fff', border: '#fff', coast: '#fff', graticule: 'rgba(0,0,0,0)' }),
+    );
+    this.photoMat = new THREE.ShaderMaterial({
+      uniforms: { uDay: { value: load(dayUrl) }, uNight: { value: load(nightUrl) }, uLand: { value: land }, uSun: { value: this.sunUniform } },
+      vertexShader: earthVertex,
+      fragmentShader: photoFragment,
+    });
+    return this.photoMat;
   }
 
   // ---------- state sync ----------
@@ -315,6 +460,15 @@ export class GlobeScene {
     const s = store.state;
     this.lastState = s;
     this.controls.autoRotate = s.autoRotate;
+    if (s.speed === 0 && this.lastSpeed !== 0) {
+      // Pause: drop the damped rotation still in flight so the globe stops at once.
+      this.controls.enableDamping = false;
+      this.controls.update();
+      this.controls.enableDamping = true;
+    }
+    this.lastSpeed = s.speed;
+    this.earth.material = s.earthStyle === 'photo' ? this.photoMaterial() : this.mapMat;
+    this.outlines.visible = s.earthStyle === 'map';
     if (s.objects.length && !this.pointsGeo.getAttribute('aColor')) this.initCatalogAttributes(s);
     const lk = JSON.stringify(s.layers);
     if (lk !== this.layerKey && this.pointsGeo.getAttribute('aSize')) {
@@ -354,6 +508,9 @@ export class GlobeScene {
       col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
     });
     this.pointsGeo.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
+    const KIND = { payload: 0, debris: 1, defunct: 2, rocket: 3 } as const;
+    this.pointsGeo.setAttribute('aKind', new THREE.BufferAttribute(Float32Array.from(s.objects, (o) => KIND[shapeOf(o)]), 1));
+    this.pointsGeo.setAttribute('aVar', new THREE.BufferAttribute(Float32Array.from(s.objects, (o) => o.norad % 4), 1));
     this.pointsGeo.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(n), 1));
     this.layerKey = '';
   }
@@ -379,7 +536,7 @@ export class GlobeScene {
     ].map((f) => {
       const el = document.createElement('div');
       el.className = `sat-label ${f.own ? 'own' : 'partner'}`;
-      el.textContent = f.id.replace(/^HLV-/, '').replace(/^MRD-/, 'MRD ');
+      el.textContent = f.id;
       el.addEventListener('click', () => store.select({ type: 'fleet', id: f.id }));
       const label = new CSS2DObject(el);
       label.center.set(-0.12, 0.5);
@@ -536,6 +693,8 @@ export class GlobeScene {
 
     this.updateFleet(now);
     this.fleetMat.uniforms.uTime.value = wallNow / 1000;
+    // Debris tumbling follows simulation time, so it freezes when paused.
+    this.pointsMat.uniforms.uTime.value = (now % 3.6e6) / 1000;
 
     // selection marker follows object
     const sp = this.selectedPosition();
@@ -650,11 +809,11 @@ export class GlobeScene {
     if (r.type === 'fleet') {
       const f = store.fleetOrbit(r.id)!;
       title = f.spec.name;
-      sub = f.spec.owner === 'own' ? `${f.spec.mission} · your fleet` : 'Partner operator · Meridane Connect';
+      sub = f.spec.owner === 'own' ? `${f.spec.mission} · your fleet` : `Partner operator · ${PARTNER_ORG.name}`;
     } else {
       const o = s.objects[r.idx];
       title = o.name;
-      sub = `${o.kind === 'PAYLOAD' ? 'Active payload' : o.kind === 'DEBRIS' ? 'Debris' : 'Defunct object'} · NORAD ${o.norad}`;
+      sub = `${objectType(o)} · NORAD ${o.norad}`;
     }
     const rect = this.host.getBoundingClientRect();
     this.tooltip.innerHTML = `<strong></strong><span></span>`;

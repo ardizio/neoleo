@@ -58,3 +58,14 @@ export function drawEarthTexture(width = 4096, pal: EarthPalette = LIGHT_EARTH):
 
   return canvas;
 }
+
+/**
+ * Coastlines and borders as [lon, lat] polylines (degrees), drawn as 3D lines on the globe so
+ * they stay sharp at any zoom; the canvas texture only supplies the fill.
+ */
+export function earthOutlines(): { coast: number[][][]; borders: number[][][] } {
+  const topo = world as unknown as Topology<{ countries: GeometryCollection; land: GeometryCollection }>;
+  const coast = mesh(topo, topo.objects.land).coordinates as number[][][];
+  const borders = mesh(topo, topo.objects.countries, (a, b) => a !== b).coordinates as number[][][];
+  return { coast, borders };
+}

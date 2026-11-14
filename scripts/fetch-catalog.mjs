@@ -18,6 +18,8 @@ const SOURCES = [
   // All other cataloged fragments and spent stages (name search, no login needed).
   { file: 'all-debris.json', url: 'NAME=DEB', kind: 'DEBRIS' },
   { file: 'rocket-bodies.json', url: 'NAME=R/B', kind: 'DEFUNCT' },
+  // Tracked but uncatalogued, unidentified objects (CelesTrak "analyst" list).
+  { file: 'analyst.json', url: 'GROUP=analyst', kind: 'DEFUNCT' },
 ];
 
 const offline = process.argv.includes('--offline');
@@ -40,19 +42,20 @@ const FIELDS = [
   'MEAN_MOTION_DOT', 'MEAN_MOTION_DDOT',
 ];
 
-const seen = new Set();
-const rows = [];
+// Same object in several sources: keep the newest element set; the first source
+// listing it still decides its kind (active list beats the name searches).
+const byId = new Map();
 for (const s of SOURCES) {
   const list = JSON.parse(fs.readFileSync(path.join(RAW, s.file), 'utf8'));
   for (const o of list) {
-    if (seen.has(o.NORAD_CAT_ID)) continue;
-    seen.add(o.NORAD_CAT_ID);
+    const prev = byId.get(o.NORAD_CAT_ID);
     // Parent bodies inside the debris groups (e.g. "FENGYUN 1C") are dead payloads.
-    let kind = s.kind;
+    let kind = prev?.kind ?? s.kind;
     if (kind === 'DEBRIS' && !/\bDEB\b/.test(o.OBJECT_NAME)) kind = 'DEFUNCT';
-    rows.push([...FIELDS.map((f) => o[f]), kind]);
+    if (!prev || Date.parse(o.EPOCH + 'Z') > Date.parse(prev.o.EPOCH + 'Z')) byId.set(o.NORAD_CAT_ID, { o, kind });
   }
 }
+const rows = [...byId.values()].map(({ o, kind }) => [...FIELDS.map((f) => o[f]), kind]);
 
 const epochs = rows.map((r) => Date.parse(r[3] + 'Z')).sort((a, b) => a - b);
 const snapshot = {

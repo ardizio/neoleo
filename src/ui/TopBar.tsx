@@ -1,8 +1,7 @@
 import { ORG, PLATFORM } from '../data/company';
-import { clock, store, useStore, visibleAlerts } from '../state/store';
-import { latest } from '../sim/alerts';
+import { clock, store, useStore } from '../state/store';
 import { utc } from './format';
-import { IconBell, IconDb, IconPause, IconPlay, IconUpload, LogoMark } from './icons';
+import { IconDb, IconPause, IconPlay, IconSliders, IconUpload, LogoMark } from './icons';
 
 const SPEEDS = [1, 10, 60, 600];
 
@@ -10,8 +9,6 @@ export function TopBar() {
   const s = useStore();
   const now = clock.now();
   const live = s.speed === 1 && Math.abs(now - Date.now()) < 3000;
-  const active = visibleAlerts(s).filter((a) => a.status !== 'resolved' && a.tca > now);
-  const unread = active.filter((a) => a.unread && latest(a).severity !== 'monitor').length;
   return (
     <header className="topbar">
       <div className="brand">
@@ -34,7 +31,7 @@ export function TopBar() {
       </nav>
       <div className="topbar-right">
         <div className="time-block">
-          <div className="time-main mono">{utc(now)} <span className="muted">UTC</span></div>
+          <div className="time-main mono">{utc(now)} <span className="muted utc">UTC</span></div>
           <div className="time-sub">{new Date(now).toISOString().slice(0, 10)} · {live ? 'Live' : `Simulated ×${s.speed}`}</div>
         </div>
         <div className="speed" role="group" aria-label="Simulation speed">
@@ -50,9 +47,8 @@ export function TopBar() {
             <span className="live-dot" /> Live
           </button>
         </div>
-        <button className="bell" onClick={() => store.set({ rightTab: 'alerts', selectedAlertId: null })} aria-label={`${unread} unread alerts`}>
-          <IconBell size={19} />
-          {unread > 0 && <span className="bell-badge">{unread}</span>}
+        <button className="bell" onClick={() => store.set({ modal: 'settings' })} aria-label="Settings" title="Settings">
+          <IconSliders size={19} />
         </button>
         <div className="user">
           <div className="avatar">{ORG.user.initials}</div>

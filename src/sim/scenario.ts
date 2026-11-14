@@ -1,4 +1,4 @@
-// Demo scenario: Halvane's simulated orbits are seeded so that they cross
+// Demo scenario: SVST26's simulated orbits are seeded so that they cross
 // real catalog objects (CelesTrak elements propagated with SGP4) at chosen
 // times after the session starts. The screening engine then has to find
 // these encounters on its own, together with any incidental close
@@ -38,43 +38,43 @@ export interface EncounterDesign {
 
 const STD_PLAN = (extra: Partial<CdmPlanStep> = {}): CdmPlanStep[] => [
   { atSec: 0, sources: ['PUB-GP', 'PUB-CDM'], sigmaScale: 1.6, note: 'Initial screening on public catalog', ...extra },
-  { atSec: 75, sources: ['PUB-GP', 'PUB-CDM', 'CTR-X'], sigmaScale: 1.0, note: 'Contractor X radar track fused' },
-  { atSec: 190, sources: ['PUB-GP', 'PUB-CDM', 'CTR-X', 'CTR-Y', 'CTR-Z'], sigmaScale: 0.72, note: 'Optical + space-based tracks fused' },
+  { atSec: 75, sources: ['PUB-GP', 'PUB-CDM', 'LEOLABS'], sigmaScale: 1.0, note: 'LeoLabs radar track fused' },
+  { atSec: 190, sources: ['PUB-GP', 'PUB-CDM', 'LEOLABS', 'SLINGSHOT', 'VYOMA'], sigmaScale: 0.72, note: 'Slingshot optical + Vyoma space-based tracks fused' },
 ];
 
 const PARTNER_PLAN: CdmPlanStep[] = [
   { atSec: 0, sources: ['PUB-CDM', 'PTN-EPH'], sigmaScale: 1.2, note: 'Owner/operator ephemerides exchanged' },
-  { atSec: 120, sources: ['PUB-CDM', 'PTN-EPH', 'CTR-X'], sigmaScale: 0.85, note: 'Independent radar confirmation' },
+  { atSec: 120, sources: ['PUB-CDM', 'PTN-EPH', 'LEOLABS'], sigmaScale: 0.85, note: 'Independent radar confirmation' },
 ];
 
 export const DESIGNS: EncounterDesign[] = [
   {
-    key: 'A', primary: 'HLV-EO-03', target: { type: 'catalog', kinds: ['DEBRIS'] },
+    key: 'A', primary: 'SVST003', target: { type: 'catalog', kinds: ['DEBRIS'] },
     tcaHours: 2.3, radialKm: 0.085, alongKm: 0.03, releaseSec: 0, plan: STD_PLAN(),
   },
   {
-    key: 'B', primary: 'HLV-EO-07', target: { type: 'partner', id: 'MRD-04' },
+    key: 'B', primary: 'SVST007', target: { type: 'partner', id: 'SVST-SG04' },
     tcaHours: 5.6, radialKm: 0.028, alongKm: 0.008, releaseSec: 0, plan: PARTNER_PLAN,
   },
   {
-    key: 'C', primary: 'HLV-IOT-02', target: { type: 'catalog', kinds: ['DEBRIS'], name: /COSMOS 2251/ },
+    key: 'C', primary: 'SVST018', target: { type: 'catalog', kinds: ['DEBRIS'], name: /COSMOS 2251/ },
     tcaHours: 8.8, radialKm: 0.12, alongKm: 0.03, releaseSec: 0, plan: STD_PLAN(),
   },
   {
-    key: 'D', primary: 'HLV-SAR-01', target: { type: 'catalog', kinds: ['DEFUNCT'], norad: 27386 },
+    key: 'D', primary: 'SVST013', target: { type: 'catalog', kinds: ['DEFUNCT'], norad: 27386 },
     tcaHours: 13.5, radialKm: 0.095, alongKm: 0.02, releaseSec: 35,
     plan: [
       { atSec: 0, sources: ['PUB-GP', 'PUB-CDM'], sigmaScale: 1.5, biasRtnKm: [0.82, 0.3, 0.25], note: 'Initial screening on public catalog' },
-      { atSec: 60, sources: ['PUB-GP', 'PUB-CDM', 'CTR-X'], sigmaScale: 1.0, biasRtnKm: [0.05, 0.04, 0.02], note: 'Contractor X radar track: secondary 0.8 km lower than catalog' },
-      { atSec: 170, sources: ['PUB-GP', 'PUB-CDM', 'CTR-X', 'CTR-Y'], sigmaScale: 0.75, note: 'Optical track confirms close approach' },
+      { atSec: 60, sources: ['PUB-GP', 'PUB-CDM', 'LEOLABS'], sigmaScale: 1.0, biasRtnKm: [0.05, 0.04, 0.02], note: 'LeoLabs radar track: secondary 0.8 km lower than catalog' },
+      { atSec: 170, sources: ['PUB-GP', 'PUB-CDM', 'LEOLABS', 'SLINGSHOT'], sigmaScale: 0.75, note: 'Slingshot optical track confirms close approach' },
     ],
   },
   {
-    key: 'E', primary: 'HLV-EO-05', target: { type: 'catalog', kinds: ['DEBRIS'], name: /IRIDIUM 33|FENGYUN|COSMOS/ },
+    key: 'E', primary: 'SVST005', target: { type: 'catalog', kinds: ['DEBRIS'], name: /IRIDIUM 33|FENGYUN|COSMOS/ },
     tcaHours: 18.7, radialKm: 0.175, alongKm: 0.03, releaseSec: 70, plan: STD_PLAN(),
   },
   {
-    key: 'F', primary: 'HLV-EO-10', target: { type: 'partner', id: 'MRD-08' },
+    key: 'F', primary: 'SVST010', target: { type: 'partner', id: 'SVST-SG08' },
     tcaHours: 22.4, radialKm: 0.072, alongKm: 0.01, releaseSec: 140, plan: PARTNER_PLAN,
   },
 ];

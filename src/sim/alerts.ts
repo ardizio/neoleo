@@ -101,7 +101,7 @@ export function issueCdm(alert: Alert, step: CdmPlanStep, now: number): CdmRecor
   const kvn = toKvn({
     messageId,
     created: now,
-    originator: 'ORBITRACE',
+    originator: 'NEOLEO',
     messageFor: ORG.name.toUpperCase().replace(/\s+/g, '_'),
     tca: alert.tca,
     missKm: geometry.missKm,

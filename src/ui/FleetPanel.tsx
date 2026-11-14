@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
-import { clock, store, useStore, visibleAlerts, type Layers } from '../state/store';
+import { clock, store, useStore, visibleAlerts } from '../state/store';
 import { latest, type Alert } from '../sim/alerts';
 import { RE } from '../orbit/kepler';
 import type { Severity } from '../orbit/pc';
 import { ORG, PARTNER_ORG } from '../data/company';
 import { countdown } from './format';
-import { IconLayers, IconSearch } from './icons';
+import { IconSearch } from './icons';
 
 const SEV_RANK: Record<Severity, number> = { critical: 3, warning: 2, watch: 1, monitor: 0 };
 
@@ -30,7 +30,7 @@ export function FleetPanel() {
   const fleet = s.fleet.filter((f) => !query || f.spec.name.includes(query) || f.spec.id.includes(query));
   const groups = ['Earth observation', 'SAR imaging', 'IoT relay'] as const;
   const catalogMatches = query.length >= 2
-    ? s.objects.filter((o) => o.name.includes(query) || String(o.norad) === query).slice(0, 30)
+    ? s.objects.filter((o) => !o.generated && (o.name.includes(query) || String(o.norad) === query)).slice(0, 30)
     : [];
   const sel = s.selected;
 
@@ -110,34 +110,6 @@ export function FleetPanel() {
           </div>
         )}
       </div>
-      <LayerControls layers={s.layers} counts={{ total: s.objects.length, debris: s.objects.filter((o) => o.kind !== 'PAYLOAD').length }} />
     </aside>
-  );
-}
-
-function LayerControls({ layers, counts }: { layers: Layers; counts: { total: number; debris: number } }) {
-  const set = (p: Partial<Layers>) => store.set((s) => ({ layers: { ...s.layers, ...p } }));
-  const toggle = (k: keyof Layers, label: string, swatch: string, sub?: string) => (
-    <label className="layer">
-      <input type="checkbox" checked={layers[k] as boolean} onChange={(e) => set({ [k]: e.target.checked })} />
-      <span className="swatch" style={{ background: swatch }} />
-      <span className="layer-label">{label}</span>
-      {sub && <span className="layer-sub mono">{sub}</span>}
-    </label>
-  );
-  return (
-    <div className="layers">
-      <div className="group-title"><IconLayers size={13} /> Layers</div>
-      {toggle('payload', 'Active satellites', '#5f6f89', (counts.total - counts.debris).toLocaleString())}
-      {toggle('debris', 'Debris & defunct', '#ea7a32', counts.debris.toLocaleString())}
-      {toggle('partner', 'Partner network', '#0e9f8c')}
-      {toggle('fleetOrbits', 'Fleet orbits', '#2457ff')}
-      {toggle('labels', 'Labels', '#1d2433')}
-      <div className="seg">
-        {(['ALL', 'LEO', 'MEO', 'GEO'] as const).map((r) => (
-          <button key={r} className={layers.regime === r ? 'on' : ''} onClick={() => set({ regime: r })}>{r === 'ALL' ? 'All orbits' : r}</button>
-        ))}
-      </div>
-    </div>
   );
 }

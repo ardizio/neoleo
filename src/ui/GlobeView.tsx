@@ -4,10 +4,10 @@ import { clock, store, useStore, visibleAlerts } from '../state/store';
 import { latest } from '../sim/alerts';
 import { formatPc, SEVERITY_LABEL } from '../orbit/pc';
 import { RE, stateAt } from '../orbit/kepler';
-import { sgp4State } from '../data/catalog';
+import { objectType, sgp4State } from '../data/catalog';
 import { norm } from '../orbit/vec';
 import { countdown, meters } from './format';
-import { IconAlert, IconClose, IconHome, IconMinus, IconPlus, IconTarget } from './icons';
+import { IconAlert, IconClose, IconHome, IconMap, IconMinus, IconPhoto, IconPlus, IconTarget } from './icons';
 import { ORG, PARTNER_ORG } from '../data/company';
 import { Toasts } from './Overlays';
 
@@ -30,7 +30,7 @@ export function GlobeView() {
   const top = open.filter((a) => latest(a).severity === 'critical' && !s.plans[a.id]?.sentAt).sort((a, b) => a.tca - b.tca)[0];
 
   return (
-    <div className="globe-wrap">
+    <div className={`globe-wrap ${s.earthStyle}`}>
       <div ref={host} className="globe-host" />
       {top && s.selectedAlertId !== top.id && (
         <button className="crit-banner" onClick={() => store.openAlert(top.id)}>
@@ -47,6 +47,15 @@ export function GlobeView() {
         <button onClick={() => sceneRef?.zoom(1.4)} aria-label="Zoom out"><IconMinus size={16} /></button>
         <button onClick={() => { store.select(null); store.openAlert(null); sceneRef?.resetView(); store.set({ autoRotate: true }); }} aria-label="Reset view"><IconHome size={16} /></button>
         <button className={s.autoRotate ? 'on' : ''} onClick={() => store.set({ autoRotate: !s.autoRotate })} aria-label="Auto-rotate" title="Auto-rotate">⟳</button>
+        <button
+          className="earth-toggle"
+          onClick={() => store.setEarthStyle(s.earthStyle === 'photo' ? 'map' : 'photo')}
+          aria-label={s.earthStyle === 'photo' ? 'Switch to map view' : 'Switch to satellite imagery'}
+          title={s.earthStyle === 'photo' ? 'Map view' : 'Satellite imagery'}
+        >
+          {s.earthStyle === 'photo' ? <IconMap size={16} /> : <IconPhoto size={16} />}
+          <span>{s.earthStyle === 'photo' ? 'Map' : 'Sat'}</span>
+        </button>
       </div>
       <div className="legend">
         <span><i className="lg own" /> {ORG.name}</span>
@@ -55,26 +64,8 @@ export function GlobeView() {
         <span><i className="lg debris" /> Debris</span>
         <span><i className="lg alert" /> At risk</span>
       </div>
-      <ScreeningStatus />
       <Toasts />
       <ObjectCard />
-    </div>
-  );
-}
-
-function ScreeningStatus() {
-  const s = useStore();
-  const sc = s.screening;
-  return (
-    <div className={`screen-pill ${sc.done ? 'done' : ''}`}>
-      {!sc.done && <span className="spinner" />}
-      {sc.done ? (
-        <span>Screening complete · {s.fleet.length} assets × {sc.candidates.toLocaleString()} objects · next 24 h</span>
-      ) : (
-        <span>Screening {s.fleet.length} assets × {sc.candidates.toLocaleString()} objects · <span className="mono">{Math.round(sc.fraction * 100)}%</span></span>
-      )}
-      <span className="pill-sep" />
-      <span className="mono">{s.objects.length.toLocaleString()}</span> tracked
     </div>
   );
 }
@@ -107,7 +98,7 @@ function ObjectCard() {
     const o = s.objects[sel.idx];
     const st = sgp4State(store.satrec(o), now);
     title = o.name;
-    sub = `${o.kind === 'PAYLOAD' ? 'Active payload' : o.kind === 'DEBRIS' ? 'Debris fragment' : 'Defunct object'} · ${o.intlId}`;
+    sub = `${objectType(o)} · ${o.intlId}`;
     rows = [
       ['NORAD', String(o.norad)],
       ['Altitude', st ? `${(norm(st.r) - RE).toFixed(1)} km` : '—'],
@@ -116,7 +107,7 @@ function ObjectCard() {
       ['Inclination', `${o.inclination.toFixed(2)}°`],
       ['Period', `${o.periodMin.toFixed(1)} min`],
       ['Element epoch', `${o.epoch.slice(0, 16).replace('T', ' ')} UTC`],
-      ['Source', 'CelesTrak GP · SGP4'],
+      ['Source', o.generated ? 'Fused catalog · SGP4' : 'CelesTrak GP · SGP4'],
     ];
   }
   const related = alertsFor ? visibleAlerts(s).filter((a) => a.primary.id === alertsFor && a.status !== 'resolved' && a.tca > now && latest(a).severity !== 'monitor') : [];

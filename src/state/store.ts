@@ -4,13 +4,14 @@ import { CATALOG_URL, loadCatalog, toSatrec, type CatalogObject, type CatalogSna
 import { FLEET, ORG, PARTNER_FLEET, PARTNER_ORG, type FleetSpec } from '../data/company';
 import type { Kep, State } from '../orbit/kepler';
 import { planAvoidance, postManeuverKep, type ManeuverOption, type SatBudget } from '../orbit/maneuver';
-import { SEVERITY_LABEL, formatPc, type Severity } from '../orbit/pc';
+import { SEVERITY_LABEL, encounter, formatPc, severityOf, type Severity } from '../orbit/pc';
+import { fuseCI, GATE_D2, mahalanobis2, type Estimate } from '../orbit/fusion';
 import type { ScreeningHit } from '../orbit/screening';
 import { parseKvn, summarize } from '../orbit/cdm';
 import { issueCdm, latest, type Alert, type ObjectRef } from '../sim/alerts';
 import { catalogRef, fleetRef } from '../sim/refs';
 import { DESIGNS, type CdmPlanStep, type FleetOrbit, type ResolvedDesign } from '../sim/scenario';
-import type { Vec3 } from '../orbit/vec';
+import { add, fromRtn, type Vec3 } from '../orbit/vec';
 
 export type Selection = { type: 'catalog'; idx: number } | { type: 'fleet'; id: string };
 
@@ -75,9 +76,12 @@ export interface AppState {
   speed: number;
   autoRotate: boolean;
   tick: number;
-  modal: null | 'sources' | 'ingest' | { cdm: { alertId: string; seq: number } };
+  modal: null | 'sources' | 'ingest' | 'settings' | { cdm: { alertId: string; seq: number } };
   rightTab: 'alerts' | 'log';
   followSelected: boolean;
+  earthStyle: 'photo' | 'map';
+  /** Which pane fills the screen on phones (ignored on desktop). */
+  mobileTab: 'globe' | 'alerts' | 'fleet';
 }
 
 export const PLAN_STEPS_SINGLE = [
@@ -118,6 +122,15 @@ export const clock = new Clock();
 
 type Listener = () => void;
 
+const DEFAULT_LAYERS: Layers = { payload: true, debris: true, partner: true, fleetOrbits: true, labels: true, regime: 'LEO' };
+function loadLayers(): Layers {
+  try {
+    return { ...DEFAULT_LAYERS, ...JSON.parse(localStorage.getItem('layers') ?? '{}'), regime: 'LEO' };
+  } catch {
+    return DEFAULT_LAYERS;
+  }
+}
+
 class Store {
   state: AppState = {
     phase: 'loading',
@@ -134,12 +147,14 @@ class Store {
     selected: null,
     selectedAlertId: null,
     hoverAlertId: null,
-    layers: { payload: true, debris: true, partner: true, fleetOrbits: true, labels: true, regime: 'ALL' },
+    layers: loadLayers(),
     speed: 1,
     autoRotate: true,
     tick: 0,
     modal: null,
     rightTab: 'alerts',
+    earthStyle: localStorage.getItem('earthStyle') === 'photo' ? 'photo' : 'map',
+    mobileTab: 'globe',
     followSelected: false,
   };
   private listeners = new Set<Listener>();
@@ -239,9 +254,9 @@ class Store {
           const sec = this.secondaryRef(h.secondaryId);
           const plan: CdmPlanStep[] = [{
             atSec: 0,
-            sources: sec.cls === 'DEBRIS' || sec.cls === 'DEFUNCT' ? ['PUB-GP', 'PUB-CDM', 'CTR-X'] : ['PUB-GP', 'PUB-CDM'],
+            sources: sec.cls === 'DEBRIS' || sec.cls === 'DEFUNCT' ? ['PUB-GP', 'PUB-CDM', 'LEOLABS'] : ['PUB-GP', 'PUB-CDM'],
             sigmaScale: 1,
-            note: 'Detected by Orbitrace catalog sweep',
+            note: 'Detected by NeoLEO catalog sweep',
           }];
           return this.makeAlert(h, plan, Math.max(4, elapsed) + Math.random() * 20);
         });
@@ -537,6 +552,12 @@ class Store {
     const other = all.find((f) => f.spec.norad === otherNorad);
     const secId = other ? other.spec.id : this.byNorad.has(otherNorad) ? `C${otherNorad}` : null;
     if (!secId) return { ok: false, message: `Secondary object ${otherNorad} is not in the current catalog.` };
+
+    // Same conjunction already tracked (other provider / later update): fuse instead of duplicating.
+    const existing = this.state.alerts.find(
+      (a) => a.primary.id === mine.spec.id && a.secondary.id === secId && a.status !== 'resolved' && Math.abs(a.tca - sum.tca) < 600e3,
+    );
+    if (existing) return this.fuseIngested(existing, so, ss, sum.messageId, text);
     const hit: ScreeningHit = { primaryId: mine.spec.id, secondaryId: secId, tca: sum.tca, missKm: sum.missKm, primary: ps, secondary: ss };
     const alert = this.makeAlert(hit, [{ atSec: 0, sources: ['PUB-CDM'], sigmaScale: 1, note: `Ingested ${sum.messageId}` }], 0);
     alert.id += '-I';
@@ -545,6 +566,47 @@ class Store {
     this.addLog('info', 'CDM ingested', `${sum.messageId} matched ${mine.spec.name}`, alert.id);
     this.onTick();
     return { ok: true, message: `Matched ${mine.spec.name}. Alert created.`, alertId: alert.id };
+  }
+
+  /**
+   * Merge an ingested CDM's secondary estimate into an existing alert.
+   * The primary stays on the owner GNSS ephemeris (authoritative for own satellites);
+   * the secondary is gated for consistency, then fused by covariance intersection.
+   */
+  private fuseIngested(alert: Alert, so: Record<string, string>, ss: State, messageId: string, kvn: string) {
+    if (alert.cdms.some((c) => c.messageId === messageId)) return { ok: true, message: `${messageId} is already part of this alert; nothing to fuse.`, alertId: alert.id };
+    const cur = latest(alert);
+    const p = alert.truth.primary;
+    const sd = (k: string, fallback: number) => {
+      const x = Number(so[k]);
+      return Number.isFinite(x) && x > 0 ? Math.sqrt(x) / 1000 : fallback; // m^2 -> km
+    };
+    const mineEst: Estimate = { r: add(p.r, fromRtn(cur.geometry.relPosRtn, p.r, p.v)), v: alert.truth.secondary.v, sigma: cur.sigmaSecondary, source: cur.sources.join('+') };
+    const theirs: Estimate = { r: ss.r, v: ss.v, sigma: [sd('CR_R', 0.1), sd('CT_T', 0.5), sd('CN_N', 0.1)], source: messageId };
+    const d2 = mahalanobis2(mineEst, theirs);
+    if (d2 > GATE_D2) {
+      this.addLog('warn', 'Ingested CDM inconsistent, not fused', `${messageId}: Mahalanobis d² ${d2.toFixed(1)} > ${GATE_D2} (99%)`, alert.id);
+      return { ok: true, message: `Matched existing alert, but the secondary state disagrees with the current solution beyond its stated covariance (d² = ${d2.toFixed(1)}). Logged for review, not fused.`, alertId: alert.id };
+    }
+    const f = fuseCI([mineEst, theirs]);
+    const hbrKm = (alert.primary.hbrM + alert.secondary.hbrM) / 1000;
+    const geometry = encounter(p.r, p.v, f.r, ss.v, cur.sigmaPrimary, f.sigma, hbrKm);
+    const rec = {
+      ...cur,
+      seq: alert.cdms.length + 1,
+      messageId,
+      created: clock.now(),
+      geometry,
+      severity: severityOf(geometry.pc, geometry.missKm),
+      sources: [...cur.sources, 'EXT-CDM'],
+      note: `Fused with ingested ${messageId} · covariance intersection, weights ${f.weights.map((w) => w.toFixed(2)).join(' / ')}`,
+      sigmaSecondary: f.sigma,
+      kvn,
+    };
+    this.set((s) => ({ alerts: s.alerts.map((a) => (a.id === alert.id ? { ...a, cdms: [...a.cdms, rec] } : a)) }));
+    this.addLog('info', 'CDM fused into existing alert', `${messageId} · d² ${d2.toFixed(1)} · Pc ${formatPc(cur.geometry.pc)} → ${formatPc(geometry.pc)}`, alert.id);
+    this.onTick();
+    return { ok: true, message: `Matched existing alert. Fused with the current solution: Pc ${formatPc(cur.geometry.pc)} → ${formatPc(geometry.pc)}.`, alertId: alert.id };
   }
 
   // ---------- ui ----------
@@ -557,19 +619,28 @@ class Store {
     this.set((s) => ({ toasts: [...s.toasts, { ...t, id }].slice(-4) }));
     setTimeout(() => this.dismissToast(id), 9000);
   }
+  setLayers(p: Partial<Layers>) {
+    this.set((s) => ({ layers: { ...s.layers, ...p } }));
+    localStorage.setItem('layers', JSON.stringify(this.state.layers));
+  }
+  setEarthStyle(earthStyle: AppState['earthStyle']) {
+    localStorage.setItem('earthStyle', earthStyle);
+    this.set({ earthStyle });
+  }
   dismissToast(id: number) {
     this.set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
   }
   openAlert(id: string | null) {
-    this.set((s) => ({ selectedAlertId: id, alerts: s.alerts.map((a) => (a.id === id ? { ...a, unread: false } : a)), autoRotate: id ? false : s.autoRotate }));
+    this.set((s) => ({ selectedAlertId: id, alerts: s.alerts.map((a) => (a.id === id ? { ...a, unread: false } : a)), autoRotate: id ? false : s.autoRotate, mobileTab: id ? 'alerts' : s.mobileTab }));
     if (id) this.acknowledge(id);
   }
   select(sel: Selection | null) {
-    this.set({ selected: sel, autoRotate: sel ? false : this.state.autoRotate });
+    this.set({ selected: sel, autoRotate: sel ? false : this.state.autoRotate, mobileTab: sel ? 'globe' : this.state.mobileTab });
   }
   setSpeed(s: number) {
     clock.setSpeed(s);
-    this.set({ speed: s });
+    // Pausing also stops the globe's auto-rotation so everything visibly freezes.
+    this.set(s === 0 ? { speed: s, autoRotate: false } : { speed: s });
     this.requestPropagation();
   }
   goLive() {

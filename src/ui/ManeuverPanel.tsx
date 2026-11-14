@@ -20,7 +20,7 @@ export function ManeuverPanel({ alert: a }: { alert: Alert }) {
     return (
       <section className={`card action-card ${actionable ? 'urgent' : ''}`}>
         <div className="action-head">
-          <div className="ai-badge"><IconSpark size={14} /> Orbitrace AI · Maneuver engine</div>
+          <div className="ai-badge"><IconSpark size={14} /> NeoLEO AI · Maneuver engine</div>
         </div>
         {passive ? (
           <>
@@ -51,7 +51,7 @@ export function ManeuverPanel({ alert: a }: { alert: Alert }) {
     return (
       <section className="card action-card computing">
         <div className="action-head">
-          <div className="ai-badge busy"><IconSpark size={14} /> Orbitrace AI · {plan.auto ? 'auto-coordination' : 'computing'}</div>
+          <div className="ai-badge busy"><IconSpark size={14} /> NeoLEO AI · {plan.auto ? 'auto-coordination' : 'computing'}</div>
         </div>
         <ol className="ai-steps">
           {steps.map((t, k) => (
@@ -70,7 +70,7 @@ export function ManeuverPanel({ alert: a }: { alert: Alert }) {
   return (
     <section className="card action-card ready">
       <div className="action-head">
-        <div className="ai-badge"><IconSpark size={14} /> Orbitrace AI · {plan.options.length} options · target Pc &lt; {PC_TARGET.toExponential(0)}</div>
+        <div className="ai-badge"><IconSpark size={14} /> NeoLEO AI · {plan.options.length} options · target Pc &lt; {PC_TARGET.toExponential(0)}</div>
         {plan.auto && <span className="auto-tag">Auto-initiated</span>}
       </div>
       {plan.options.length === 0 && <p>No burn within the search space brings Pc below target before TCA. Escalate to {ORG.flightDynamicsTeam}.</p>}

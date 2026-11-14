@@ -1,22 +1,27 @@
 import { useState } from 'react';
-import { store, useStore } from '../state/store';
-import { DATA_SOURCES, ORG } from '../data/company';
-import { IconAlert, IconCheck, IconClose, IconDownload, IconUpload } from './icons';
+import { store, useStore, type Layers } from '../state/store';
+import { DATA_SOURCES, flag, ORG, type SourceGroup } from '../data/company';
+import { IconAlert, IconCheck, IconClose, IconDownload, IconLayers, IconUpload } from './icons';
 
+/** One compact notification at a time (newest); older ones collapse into a "+N" counter. */
 export function Toasts() {
   const s = useStore();
+  const t = s.toasts[s.toasts.length - 1];
+  if (!t) return null;
+  const more = s.toasts.length - 1;
   return (
     <div className="toasts" aria-live="assertive">
-      {s.toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.severity}`}>
-          <span className="toast-icon">{t.severity === 'success' ? <IconCheck size={16} /> : <IconAlert size={16} />}</span>
-          <button className="toast-body" onClick={() => { if (t.alertId) store.openAlert(t.alertId); store.dismissToast(t.id); }}>
-            <strong>{t.title}</strong>
-            <span>{t.body}</span>
-          </button>
-          <button className="icon-btn" onClick={() => store.dismissToast(t.id)} aria-label="Dismiss"><IconClose size={14} /></button>
-        </div>
-      ))}
+      <div key={t.id} className={`toast ${t.severity}`}>
+        <span className="toast-icon">{t.severity === 'success' ? <IconCheck size={15} /> : <IconAlert size={15} />}</span>
+        <button className="toast-body" onClick={() => { if (t.alertId) store.openAlert(t.alertId); store.dismissToast(t.id); }}>
+          <strong>{t.title}</strong>
+          <span>{t.body}</span>
+        </button>
+        {more > 0 && (
+          <button className="toast-more mono" onClick={() => s.toasts.forEach((x) => store.dismissToast(x.id))} title="Dismiss all">+{more}</button>
+        )}
+        <button className="icon-btn" onClick={() => store.dismissToast(t.id)} aria-label="Dismiss"><IconClose size={14} /></button>
+      </div>
     </div>
   );
 }
@@ -27,44 +32,96 @@ export function Modals() {
   const close = () => store.set({ modal: null });
   return (
     <div className="modal-backdrop" onClick={close}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className={`modal ${s.modal === 'settings' ? 'narrow' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button className="icon-btn modal-close" onClick={close} aria-label="Close"><IconClose size={18} /></button>
         {s.modal === 'sources' && <Sources />}
         {s.modal === 'ingest' && <Ingest />}
+        {s.modal === 'settings' && <Settings />}
         {typeof s.modal === 'object' && 'cdm' in s.modal && <CdmViewer alertId={s.modal.cdm.alertId} seq={s.modal.cdm.seq} />}
       </div>
     </div>
   );
 }
 
+const GROUPS: SourceGroup[] = ['Platform', 'Government', 'Commercial · own sensors', 'Commercial · fused data'];
+
 function Sources() {
   const s = useStore();
   const deb = s.objects.filter((o) => o.kind !== 'PAYLOAD').length;
+  const online = DATA_SOURCES.filter((d) => d.status === 'online').length;
   return (
     <>
       <h2>Data sources</h2>
-      <p className="modal-lead">Orbitrace fuses public catalogs, commercial tracking contractors and operator ephemerides into one solution per object. Every CDM lists the feeds that contributed to it.</p>
-      <table className="table">
-        <thead><tr><th>Feed</th><th>Type</th><th>Detail</th><th>Latency</th><th>Status</th></tr></thead>
-        <tbody>
-          {DATA_SOURCES.map((d) => (
-            <tr key={d.id}>
-              <td><strong>{d.name}</strong><div className="muted mono">{d.id}</div></td>
-              <td>{d.kind}</td>
-              <td>{d.detail}</td>
-              <td className="mono">{d.latencyMin} min</td>
-              <td><span className={`src-status ${d.status}`}>{d.status}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <p className="modal-lead">NeoLEO fuses government catalogs, commercial sensor networks and analytics providers into one solution per object. Every CDM lists the feeds that contributed to it.</p>
+      <div className="src-stats">
+        <div><b className="mono">{DATA_SOURCES.length}</b><span>feeds</span></div>
+        <div><b className="mono ok">{online}</b><span>online</span></div>
+        <div><b className="mono">{new Set(DATA_SOURCES.map((d) => d.country).filter(Boolean)).size}</b><span>countries</span></div>
+        <div><b className="mono">{s.objects.length.toLocaleString()}</b><span>objects tracked</span></div>
+      </div>
+      {GROUPS.map((g) => {
+        const list = DATA_SOURCES.filter((d) => d.group === g);
+        return (
+          <section key={g} className="src-group">
+            <div className="group-title">{g} <span>{list.length}</span></div>
+            <div className="src-grid">
+              {list.map((d) => (
+                <div key={d.id} className="src-card">
+                  <div className="src-card-top">
+                    <span className="flag" title={d.country || 'Not tied to one country'}>{flag(d.country)}</span>
+                    <span className="src-card-name">{d.name}</span>
+                    <span className={`src-dot ${d.status}`} title={d.status} />
+                  </div>
+                  <div className="src-card-detail">{d.detail}</div>
+                  <div className="src-card-meta mono">
+                    <span>{d.kind}</span>
+                    <span>{d.latencyMin ? `${d.latencyMin} min` : 'on upload'}</span>
+                    {!d.simulated && <span className="real-tag">live data</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
       <div className="facts">
-        <div><span className="mono">{s.objects.length.toLocaleString()}</span> catalog objects</div>
         <div><span className="mono">{(s.objects.length - deb).toLocaleString()}</span> active payloads</div>
         <div><span className="mono">{deb.toLocaleString()}</span> debris and defunct</div>
         <div>Snapshot <span className="mono">{s.snapshot?.fetchedAt.slice(0, 16).replace('T', ' ')} UTC</span></div>
       </div>
-      <p className="hint">Demo: the catalog is a real CelesTrak GP snapshot propagated with SGP4. {ORG.name}, partner orbits, contractor feeds and covariances are simulated.</p>
+      <p className="hint">Demo: only the CelesTrak catalog and uploaded CDMs are real. Everything else shown is simulated, and no provider listed here supplies data to this demo.</p>
+    </>
+  );
+}
+
+function Settings() {
+  const s = useStore();
+  const layers = s.layers;
+  const deb = s.objects.filter((o) => o.kind !== 'PAYLOAD').length;
+  const set = (p: Partial<Layers>) => store.setLayers(p);
+  const toggle = (k: keyof Layers, label: string, swatch: string, sub?: string) => (
+    <label className="layer">
+      <input type="checkbox" checked={layers[k] as boolean} onChange={(e) => set({ [k]: e.target.checked })} />
+      <span className="swatch" style={{ background: swatch }} />
+      <span className="layer-label">{label}</span>
+      {sub && <span className="layer-sub mono">{sub}</span>}
+    </label>
+  );
+  const sc = s.screening;
+  return (
+    <>
+      <h2>Settings</h2>
+      <div className="layers">
+        <div className="group-title"><IconLayers size={13} /> Layers</div>
+        {toggle('payload', 'Active satellites', 'var(--payload)', (s.objects.length - deb).toLocaleString())}
+        {toggle('debris', 'Debris & defunct', 'var(--debris)', deb.toLocaleString())}
+        {toggle('partner', 'Partner network', 'var(--partner)')}
+        {toggle('fleetOrbits', 'Fleet orbits', 'var(--brand)')}
+        {toggle('labels', 'Labels', 'var(--ink)')}
+      </div>
+      <p className="hint">
+        Screening {sc.done ? 'complete' : `${Math.round(sc.fraction * 100)}%`} · {s.fleet.length} assets × {sc.candidates.toLocaleString()} objects · next 24 h · {s.objects.length.toLocaleString()} tracked
+      </p>
     </>
   );
 }
@@ -81,7 +138,7 @@ function Ingest() {
   return (
     <>
       <h2>Ingest a CDM</h2>
-      <p className="modal-lead">Paste or upload a CCSDS 508.0-B-1 conjunction data message in KVN format. If one of the two objects belongs to {ORG.name}, an alert is raised using the state vectors in the message.</p>
+      <p className="modal-lead">Paste or upload a CCSDS 508.0-B-1 conjunction data message in KVN format. If one of the two objects belongs to {ORG.name}, an alert is raised using the state vectors in the message. If that conjunction is already tracked, the message is checked for consistency and fused into the existing alert instead of duplicating it.</p>
       <div className="ingest-actions">
         <label className="ghost-btn">
           <IconUpload size={14} /> Upload .cdm / .txt

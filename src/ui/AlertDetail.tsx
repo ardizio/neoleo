@@ -1,7 +1,8 @@
 import { clock, store, useStore } from '../state/store';
 import { latest, type Alert, type CdmRecord } from '../sim/alerts';
 import { SEVERITY_LABEL, formatPc } from '../orbit/pc';
-import { DATA_SOURCES } from '../data/company';
+import { DATA_SOURCES, flag } from '../data/company';
+
 import { countdown, meters, utc, utcShort } from './format';
 import { BPlane } from './BPlane';
 import { ManeuverPanel } from './ManeuverPanel';
@@ -80,17 +81,14 @@ export function AlertDetail() {
         <section className="card">
           <div className="card-title">Data fusion <span className="muted">· {c.sources.length} of {DATA_SOURCES.length} feeds in latest solution</span></div>
           <div className="fusion">
-            {DATA_SOURCES.map((d) => {
-              const used = c.sources.includes(d.id);
-              return (
-                <div key={d.id} className={`fusion-row ${used ? 'used' : ''}`}>
-                  <span className="fusion-check">{used ? <IconCheck size={13} /> : null}</span>
-                  <span className="fusion-name">{d.name}</span>
-                  <span className="fusion-kind">{d.kind}</span>
-                  <span className={`src-status ${d.status}`}>{d.status}</span>
-                </div>
-              );
-            })}
+            {DATA_SOURCES.filter((d) => c.sources.includes(d.id)).map((d) => (
+              <div key={d.id} className="fusion-row used">
+                <span className="fusion-check"><IconCheck size={13} /></span>
+                <span className="fusion-name"><span className="flag">{flag(d.country)}</span> {d.name}</span>
+                <span className="fusion-kind">{d.kind}</span>
+                <span className={`src-status ${d.status}`}>{d.status}</span>
+              </div>
+            ))}
           </div>
           <div className="sigma-row mono">
             <span>σ {a.secondary.name.length > 18 ? 'secondary' : a.secondary.name} R/T/N: {c.sigmaSecondary.map((x) => (x * 1000).toFixed(0)).join(' / ')} m</span>

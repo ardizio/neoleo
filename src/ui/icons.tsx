@@ -71,13 +71,22 @@ export const IconTarget = (p: P) => (
 export const IconLayers = (p: P) => (
   <svg {...base(p)}><path d="m12 4 9 5-9 5-9-5 9-5Z" /><path d="m3 14 9 5 9-5" /></svg>
 );
+export const IconSliders = (p: P) => (
+  <svg {...base(p)}><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
+);
+export const IconMap = (p: P) => (
+  <svg {...base(p)}><path d="m3 6 6-2 6 2 6-2v14l-6 2-6-2-6 2V6Z" /><path d="M9 4v14M15 6v14" /></svg>
+);
+export const IconPhoto = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><path d="M5 9c3 1 4 4 7 3s3-5 6-4M7 18c2-2 5-1 7-3" /></svg>
+);
 export const IconChevron = (p: P) => (
   <svg {...base(p)}><path d="m9 6 6 6-6 6" /></svg>
 );
 export const LogoMark = ({ size = 28 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
     <circle cx="16" cy="16" r="7.5" fill="#2457ff" />
-    <ellipse cx="16" cy="16" rx="14" ry="5.2" fill="none" stroke="#1d2433" strokeWidth="1.8" transform="rotate(-28 16 16)" />
+    <ellipse cx="16" cy="16" rx="14" ry="5.2" fill="none" stroke="currentColor" strokeWidth="1.8" transform="rotate(-28 16 16)" />
     <circle cx="27.4" cy="10" r="2.3" fill="#e5383b" />
   </svg>
 );

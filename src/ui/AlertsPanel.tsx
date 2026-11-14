@@ -40,7 +40,7 @@ export function typeLabel(a: Alert) {
 
 export function AlertsPanel() {
   const s = useStore();
-  const [filter, setFilter] = useState<'action' | 'all' | 'monitor'>('action');
+  const [filter, setFilter] = useState<'action' | 'all'>('action');
   const now = clock.now();
   if (s.selectedAlertId) return <AlertDetail />;
 
@@ -48,7 +48,7 @@ export function AlertsPanel() {
   const open = all.filter((a) => a.status !== 'resolved' && a.tca > now);
   const counts = Object.fromEntries(ORDER.map((k) => [k, open.filter((a) => latest(a).severity === k).length])) as Record<Severity, number>;
   const rank = (a: Alert) => ORDER.indexOf(latest(a).severity);
-  let list = filter === 'action' ? open.filter((a) => rank(a) <= 2) : filter === 'monitor' ? open.filter((a) => rank(a) === 3) : all;
+  let list = filter === 'action' ? open.filter((a) => rank(a) <= 2) : all;
   list = [...list].sort((a, b) => (a.status === 'resolved' ? 1 : 0) - (b.status === 'resolved' ? 1 : 0) || rank(a) - rank(b) || a.tca - b.tca);
 
   return (
@@ -66,17 +66,13 @@ export function AlertsPanel() {
             <span className="sev-name">{SEVERITY_LABEL[k]}</span>
           </button>
         ))}
-        <button className="sev-tile monitor" onClick={() => setFilter('monitor')}>
-          <span className="sev-num mono">{counts.monitor}</span>
-          <span className="sev-name">Monitoring</span>
-        </button>
       </div>
       <div className="tabs">
         <button className={s.rightTab === 'alerts' ? 'on' : ''} onClick={() => store.set({ rightTab: 'alerts' })}>Alert log</button>
         <button className={s.rightTab === 'log' ? 'on' : ''} onClick={() => store.set({ rightTab: 'log' })}>Event log <span className="tab-count">{s.log.length}</span></button>
         {s.rightTab === 'alerts' && (
           <div className="filter">
-            {([['action', 'Action'], ['all', 'All'], ['monitor', 'Low risk']] as const).map(([k, l]) => (
+            {([['action', 'Action'], ['all', 'All']] as const).map(([k, l]) => (
               <button key={k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>{l}</button>
             ))}
           </div>
