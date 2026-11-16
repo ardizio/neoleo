@@ -5,9 +5,30 @@ import { RE } from '../orbit/kepler';
 import type { Severity } from '../orbit/pc';
 import { ORG, PARTNER_ORG } from '../data/company';
 import { countdown } from './format';
-import { IconSearch } from './icons';
+import { IconDb, IconLink, IconMore, IconSearch, IconUpload } from './icons';
 
 const SEV_RANK: Record<Severity, number> = { critical: 3, warning: 2, watch: 1, monitor: 0 };
+
+/** ⋯ menu: fleet data in and out (CDM ingest, API, feeds). */
+function FleetMenu() {
+  const [open, setOpen] = useState(false);
+  const go = (modal: 'ingest' | 'api' | 'sources') => { setOpen(false); store.set({ modal }); };
+  return (
+    <div className="more">
+      <button className="icon-btn" onClick={() => setOpen(!open)} aria-label="Fleet data options" aria-expanded={open}><IconMore size={18} /></button>
+      {open && (
+        <>
+          <div className="more-scrim" onClick={() => setOpen(false)} />
+          <div className="more-menu" role="menu">
+            <button role="menuitem" onClick={() => go('ingest')}><IconUpload size={15} /> Ingest CDM</button>
+            <button role="menuitem" onClick={() => go('api')}><IconLink size={15} /> API access</button>
+            <button role="menuitem" onClick={() => go('sources')}><IconDb size={15} /> Data sources</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 export function FleetPanel() {
   const s = useStore();
@@ -41,8 +62,11 @@ export function FleetPanel() {
           <div className="eyebrow">{ORG.name}</div>
           <h2>My fleet</h2>
         </div>
-        <div className="fleet-count">
-          <span className="mono">{s.fleet.length}</span> satellites
+        <div className="fleet-head-right">
+          <div className="fleet-count">
+            <span className="mono">{s.fleet.length}</span> satellites
+          </div>
+          <FleetMenu />
         </div>
       </div>
       <div className="search">

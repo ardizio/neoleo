@@ -36,3 +36,16 @@ export function ago(ms: number): string {
 export function cms(ms: number): string {
   return `${(ms * 100).toFixed(1)} cm/s`;
 }
+
+/** Simulation speeds: negative = rewind. One tap on − / + moves one step. */
+const SPEED_STEPS = [-3600, -600, -60, -10, -1, 1, 10, 60, 600, 3600];
+export function speedLabel(v: number, live: boolean): string {
+  if (v === 0) return 'Paused';
+  if (live) return 'Live';
+  return v < 0 ? `Rewind ${-v}×` : `${v}×`;
+}
+export function stepSpeed(v: number, dir: 1 | -1): number {
+  if (v === 0) return dir;
+  const next = dir > 0 ? SPEED_STEPS.find((x) => x > v) : [...SPEED_STEPS].reverse().find((x) => x < v);
+  return next ?? v;
+}

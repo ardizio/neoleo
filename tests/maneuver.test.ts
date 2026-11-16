@@ -37,6 +37,13 @@ describe('maneuver planner', () => {
       expect(opts.length).toBeGreaterThan(0);
       expect(opts.every((o) => o.result.pc < PC_TARGET)).toBe(true);
       if (partner) expect(opts.find((o) => o.recommended)!.strategy).toBe('shared');
+      // every profile is surfaced exactly once, and each winner really wins its criterion
+      for (const p of ['balanced', 'fuel', 'safe', 'lead'] as const) expect(opts.filter((o) => o.profiles.includes(p)).length).toBe(1);
+      const prop = (o: (typeof opts)[0]) => o.burns.reduce((t, b) => t + b.propellantG, 0);
+      const fuel = opts.find((o) => o.profiles.includes('fuel'))!, safe = opts.find((o) => o.profiles.includes('safe'))!;
+      expect(opts.every((o) => prop(o) >= prop(fuel) - 1e-9)).toBe(true);
+      expect(opts.every((o) => o.result.pc >= safe.result.pc * 0.999)).toBe(true);
+      console.log('   profiles:', opts.filter((o) => o.profiles.length).map((o) => `${o.profiles.join('+')}: ${o.label} ${prop(o).toFixed(1)} g Pc ${formatPc(o.result.pc)} miss ${(o.result.missKm * 1000).toFixed(0)} m`).join(' | '));
     });
   }
 });

@@ -53,6 +53,23 @@ export interface Layers {
   fleetOrbits: boolean;
   labels: boolean;
   regime: 'ALL' | 'LEO' | 'MEO' | 'GEO';
+  /** Type filter: debris = fragments only; rocket bodies and defunct payloads have their own switch. */
+  rocket: boolean;
+  defunct: boolean;
+  /** Altitude filter (km): an object shows if its perigee–apogee range overlaps [altMin, altMax]. */
+  altMin: number;
+  altMax: number;
+  colors: ObjColors;
+  /** True once the user picked colours; otherwise new defaults apply on update. */
+  colorsCustom?: boolean;
+}
+/** User-selectable globe colours (hex), shared by the 3D scene and the legend/CSS. */
+export interface ObjColors { own: string; payload: string; debris: string; defunct: string; partner: string }
+// Validated (dataviz palette check, all pairs, incl. colour-blind): fleet Ember, satellites blue, debris magenta, partner aqua.
+export const DEFAULT_COLORS: ObjColors = { own: '#EE7414', payload: '#2A78D6', debris: '#C2368F', defunct: '#E87BA4', partner: '#1BAF7A' };
+function applyColorVars(c: ObjColors) {
+  const st = document.documentElement.style;
+  (Object.keys(c) as (keyof ObjColors)[]).forEach((k) => st.setProperty(`--${k}`, c[k]));
 }
 
 export interface AppState {
@@ -76,7 +93,7 @@ export interface AppState {
   speed: number;
   autoRotate: boolean;
   tick: number;
-  modal: null | 'sources' | 'ingest' | 'settings' | { cdm: { alertId: string; seq: number } };
+  modal: null | 'sources' | 'ingest' | 'settings' | 'api' | { cdm: { alertId: string; seq: number } };
   rightTab: 'alerts' | 'log';
   followSelected: boolean;
   earthStyle: 'photo' | 'map';
@@ -122,10 +139,13 @@ export const clock = new Clock();
 
 type Listener = () => void;
 
-const DEFAULT_LAYERS: Layers = { payload: true, debris: true, partner: true, fleetOrbits: true, labels: true, regime: 'LEO' };
+const DEFAULT_LAYERS: Layers = { payload: true, debris: true, rocket: true, defunct: true, partner: true, fleetOrbits: true, labels: true, regime: 'LEO', altMin: 0, altMax: 2000, colors: DEFAULT_COLORS };
 function loadLayers(): Layers {
   try {
-    return { ...DEFAULT_LAYERS, ...JSON.parse(localStorage.getItem('layers') ?? '{}'), regime: 'LEO' };
+    const saved = JSON.parse(localStorage.getItem('layers') ?? '{}');
+    const l: Layers = { ...DEFAULT_LAYERS, ...saved, regime: 'LEO', colors: saved.colorsCustom ? { ...DEFAULT_COLORS, ...saved.colors } : DEFAULT_COLORS };
+    applyColorVars(l.colors);
+    return l;
   } catch {
     return DEFAULT_LAYERS;
   }
@@ -223,6 +243,11 @@ class Store {
       this.addLog('info', `Signed in as ${ORG.user.name}`, `${ORG.name} · ${FLEET.length} satellites under management`);
       this.addLog('info', 'Catalog loaded', `${objects.length.toLocaleString()} objects · ${snapshot.source}`);
       this.set({ phase: 'ready' });
+      if (sessionStorage.getItem('hardReloaded')) {
+        sessionStorage.removeItem('hardReloaded');
+        history.replaceState(null, '', location.pathname);
+        this.toast({ severity: 'success', title: 'Cache cleared, app reloaded', body: `Build ${import.meta.env.VITE_BUILD_ID}` });
+      }
       setInterval(() => this.onTick(), 1000);
     } catch (err) {
       this.set({ phase: 'error', error: String(err) });
@@ -622,6 +647,7 @@ class Store {
   setLayers(p: Partial<Layers>) {
     this.set((s) => ({ layers: { ...s.layers, ...p } }));
     localStorage.setItem('layers', JSON.stringify(this.state.layers));
+    if (p.colors) applyColorVars(this.state.layers.colors);
   }
   setEarthStyle(earthStyle: AppState['earthStyle']) {
     localStorage.setItem('earthStyle', earthStyle);

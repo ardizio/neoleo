@@ -1,0 +1,12 @@
+{
+  "name": "NeoLEO",
+  "short_name": "NeoLEO",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F2EE",
+  "theme_color": "#FFFFFF",
+  "icons": [
+    { "src": "/brand/neoleo-app-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/neoleo-app-icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

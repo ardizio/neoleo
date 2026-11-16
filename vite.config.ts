@@ -9,7 +9,11 @@ const catalogVersion = createHash('sha1').update(readFileSync('public/data/catal
 export default defineConfig({
   plugins: [react()],
   base: './',
-  define: { 'import.meta.env.VITE_CATALOG_VERSION': JSON.stringify(catalogVersion) },
+  define: {
+    'import.meta.env.VITE_CATALOG_VERSION': JSON.stringify(catalogVersion),
+    // Build stamp shown in Settings and after a hard reload, to check a device runs the latest build.
+    'import.meta.env.VITE_BUILD_ID': JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),
+  },
   worker: { format: 'es' },
   build: { chunkSizeWarningLimit: 2500 },
 });

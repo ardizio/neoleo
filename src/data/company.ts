@@ -38,6 +38,10 @@ export interface FleetSpec {
   hbrM: number; // hard-body radius
   priority: 1 | 2 | 3; // 1 = highest mission priority
   bus: string;
+  launchYear: number;
+  lifeYears: number; // design life; end of mission = launchYear + lifeYears
+  disposal: string;
+  disposalPlan: string;
 }
 
 const eo = (n: number, raan: number, phase: number): FleetSpec => ({
@@ -57,6 +61,10 @@ const eo = (n: number, raan: number, phase: number): FleetSpec => ({
   hbrM: 4,
   priority: 1,
   bus: 'HV-180 smallsat',
+  launchYear: 2023 + (n % 3),
+  lifeYears: 5,
+  disposal: 'Propulsive lowering + natural decay',
+  disposalPlan: 'Lower perigee to 350 km with remaining propellant, then re-entry by drag within 2 years (Zero Debris < 5 yr).',
 });
 
 const sar = (n: number, raan: number, phase: number): FleetSpec => ({
@@ -76,6 +84,10 @@ const sar = (n: number, raan: number, phase: number): FleetSpec => ({
   hbrM: 6,
   priority: 1,
   bus: 'HV-400 radar',
+  launchYear: 2025,
+  lifeYears: 7,
+  disposal: 'Controlled lowering (electric propulsion)',
+  disposalPlan: 'Electric-propulsion spiral down from 768 km to 300 km over ~6 months, then re-entry within weeks. Propellant reserved: 2.5 kg.',
 });
 
 const iot = (n: number, raan: number, phase: number): FleetSpec => ({
@@ -95,6 +107,10 @@ const iot = (n: number, raan: number, phase: number): FleetSpec => ({
   hbrM: 1.5,
   priority: 2,
   bus: '12U cubesat',
+  launchYear: 2024,
+  lifeYears: 3,
+  disposal: 'Drag sail + natural decay',
+  disposalPlan: 'Deploy drag sail at end of mission; re-entry from 600 km within ~3 years. Passivation: vent cold gas, discharge batteries.',
 });
 
 /** Own fleet, named SVST001…SVST024 in list order. */
@@ -128,6 +144,10 @@ export const PARTNER_FLEET: FleetSpec[] = Array.from({ length: 10 }, (_, k) => (
   hbrM: 5,
   priority: 2 as const,
   bus: 'MC-260',
+  launchYear: 2024,
+  lifeYears: 6,
+  disposal: 'Propulsive deorbit',
+  disposalPlan: 'Managed by SVST Singapore: direct deorbit burn sequence at end of mission.',
 }));
 
 export type SourceGroup = 'Platform' | 'Government' | 'Commercial · own sensors' | 'Commercial · fused data';

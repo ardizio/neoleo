@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Term } from './Term';
 import { clock, store, useStore, visibleAlerts, type AppState } from '../state/store';
 import { latest, type Alert } from '../sim/alerts';
 import { SEVERITY_LABEL, formatPc, type Severity } from '../orbit/pc';
@@ -10,9 +11,10 @@ const ORDER: Severity[] = ['critical', 'warning', 'watch', 'monitor'];
 
 export function statusText(a: Alert, s: AppState): { text: string; tone: 'idle' | 'busy' | 'ok' | 'action' } {
   const p = s.plans[a.id];
+  const contact = `Matchmaking instantiated · in contact with ${a.secondary.operator}`;
   switch (a.status) {
     case 'computing':
-      return { text: p?.auto ? 'Auto-coordination · computing joint plan' : 'Computing maneuver…', tone: 'busy' };
+      return { text: p?.auto ? `${contact} · computing joint plan` : 'Computing maneuver…', tone: 'busy' };
     case 'plan-ready':
       return { text: p?.auto ? 'Joint plan ready · sending' : 'Maneuver options ready', tone: 'action' };
     case 'sent-internal':
@@ -25,7 +27,7 @@ export function statusText(a: Alert, s: AppState): { text: string; tone: 'idle' 
       return { text: s.plans[a.id]?.executed ? 'Cleared by maneuver' : 'TCA passed', tone: 'idle' };
     default: {
       const sev = latest(a).severity;
-      if (sev === 'critical' || sev === 'warning') return { text: a.type === 'ACTIVE_PASSIVE' ? 'Action required · compute avoidance' : 'Coordination required', tone: 'action' };
+      if (sev === 'critical' || sev === 'warning') return { text: a.type === 'ACTIVE_PASSIVE' ? 'Action required · compute avoidance' : contact, tone: 'action' };
       return { text: 'Monitoring', tone: 'idle' };
     }
   }
@@ -118,15 +120,15 @@ function AlertCard({ a, s, now }: { a: Alert; s: AppState; now: number }) {
       </div>
       <div className="ac-metrics">
         <div>
-          <span className="m-label">TCA in</span>
+          <Term label="TCA in" />
           <span className="m-val big mono">{countdown(a.tca - now)}</span>
         </div>
         <div>
-          <span className="m-label">Pc</span>
+          <Term label="Pc" />
           <span className="m-val mono">{formatPc(c.geometry.pc)}</span>
         </div>
         <div>
-          <span className="m-label">Miss</span>
+          <Term label="Miss" />
           <span className="m-val mono">{meters(c.geometry.missKm)}</span>
         </div>
       </div>

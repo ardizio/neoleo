@@ -80,13 +80,39 @@ export const IconMap = (p: P) => (
 export const IconPhoto = (p: P) => (
   <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><path d="M5 9c3 1 4 4 7 3s3-5 6-4M7 18c2-2 5-1 7-3" /></svg>
 );
+export const IconMore = (p: P) => (
+  <svg {...base(p)}><circle cx="5.5" cy="12" r="1.3" fill="currentColor" /><circle cx="12" cy="12" r="1.3" fill="currentColor" /><circle cx="18.5" cy="12" r="1.3" fill="currentColor" /></svg>
+);
 export const IconChevron = (p: P) => (
   <svg {...base(p)}><path d="m9 6 6 6-6 6" /></svg>
 );
-export const LogoMark = ({ size = 28 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden>
-    <circle cx="16" cy="16" r="7.5" fill="#2457ff" />
-    <ellipse cx="16" cy="16" rx="14" ry="5.2" fill="none" stroke="currentColor" strokeWidth="1.8" transform="rotate(-28 16 16)" />
-    <circle cx="27.4" cy="10" r="2.3" fill="#e5383b" />
+/** NeoLEO orbital symbol (brand kit 11b): Navy planet + orbit, Ember satellite. */
+export const LogoMark = ({ size = 28, reverse = false }: { size?: number; reverse?: boolean }) => (
+  <svg width={size} height={size} viewBox="4 4 56 56" aria-hidden>
+    <circle cx="32" cy="32" r="13" fill={reverse ? '#FFFFFF' : '#14275E'} />
+    <path d="M41.34 8.81 A25 25 0 1 0 55.19 22.66" fill="none" stroke={reverse ? '#FFFFFF' : '#14275E'} strokeWidth="3" />
+    <circle cx="49.68" cy="14.32" r="6" fill={reverse ? '#FF8A2A' : '#EE7414'} />
   </svg>
+);
+export const IconRewind = (p: P) => (
+  <svg {...base(p)}><path d="M11 7.5v9a.8.8 0 0 1-1.3.6L4.5 12.6a.8.8 0 0 1 0-1.2l5.2-4.5a.8.8 0 0 1 1.3.6Z" /><path d="M19.5 7.5v9a.8.8 0 0 1-1.3.6L13 12.6a.8.8 0 0 1 0-1.2l5.2-4.5a.8.8 0 0 1 1.3.6Z" /></svg>
+);
+export const IconForward = (p: P) => (
+  <svg {...base(p)}><path d="M13 7.5v9a.8.8 0 0 0 1.3.6l5.2-4.5a.8.8 0 0 0 0-1.2l-5.2-4.5a.8.8 0 0 0-1.3.6Z" /><path d="M4.5 7.5v9a.8.8 0 0 0 1.3.6l5.2-4.5a.8.8 0 0 0 0-1.2L5.8 6.9a.8.8 0 0 0-1.3.6Z" /></svg>
+);
+export const IconRotate = (p: P) => (
+  <svg {...base(p)}><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3" /><path d="M19.5 4.5v4h-4" /></svg>
+);
+/* Rounded tab-bar glyphs (phones). */
+export const TabGlobe = (p: P) => (
+  <svg {...base(p)}><circle cx="12" cy="12" r="8.5" /><path d="M3.8 9.5h16.4M3.8 14.5h16.4M12 3.5c-2.6 2.4-2.6 14.6 0 17M12 3.5c2.6 2.4 2.6 14.6 0 17" /></svg>
+);
+export const TabAlerts = (p: P) => (
+  <svg {...base(p)}><path d="M6.5 16.5V11a5.5 5.5 0 0 1 11 0v5.5l1.3 1.6a.6.6 0 0 1-.5 1H5.7a.6.6 0 0 1-.5-1l1.3-1.6Z" /><path d="M10 21a2.2 2.2 0 0 0 4 0" /></svg>
+);
+export const TabFleet = (p: P) => (
+  <svg {...base(p)}><rect x="9" y="9" width="6" height="6" rx="2" /><rect x="2.5" y="10" width="5" height="4" rx="1.6" /><rect x="16.5" y="10" width="5" height="4" rx="1.6" /><path d="M12 9V6.5M12 6.5a1.4 1.4 0 1 0 0-.1" /></svg>
+);
+export const TabData = (p: P) => (
+  <svg {...base(p)}><rect x="4" y="4" width="16" height="16" rx="5" /><path d="M8 15v-3M12 15V9M16 15v-5" /></svg>
 );

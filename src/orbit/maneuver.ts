@@ -8,6 +8,18 @@ import { bodyState, refineTca, type Body } from './screening';
 
 const G0 = 9.80665;
 export const PC_TARGET = 1e-6;
+/** "Safest" profile: Pc a hundred times below the normal target and at least 1 km miss. */
+export const PC_SAFE = 1e-8;
+export const MISS_SAFE_KM = 1.0;
+
+/** Profiles the planner always surfaces, each on the option that best fits it. */
+export type Profile = 'balanced' | 'fuel' | 'safe' | 'lead';
+export const PROFILE_INFO: Record<Profile, { label: string; why: string }> = {
+  balanced: { label: 'Recommended', why: 'Best overall score: propellant weighted by mission priority, time left to verify and upload, and residual risk.' },
+  fuel: { label: 'Lowest fuel', why: 'Least propellant of all options that still bring Pc below 1e-6: the longest satellite lifetime.' },
+  safe: { label: 'Safest', why: 'Lowest residual collision probability, with at least 1 km miss and Pc below 1e-8: margin against tracking errors.' },
+  lead: { label: 'Most lead time', why: 'Earliest burn: the most time to upload the command, verify it, and re-plan if something goes wrong.' },
+};
 
 export interface SatBudget {
   id: string;
@@ -45,6 +57,8 @@ export interface ManeuverOption {
   score: number;
   recommended: boolean;
   rationale: string;
+  /** Profiles this option wins (an option can win several). */
+  profiles: Profile[];
 }
 
 export interface PlanInput {
@@ -96,15 +110,15 @@ function leadTimes(inp: PlanInput, kep: Kep): number[] {
     .filter((t) => t > inp.now + 20 * 60e3);
 }
 
-/** Smallest along-track burn at time t that brings Pc below target. */
-function minimalBurn(kep: Kep, sb: Body, t: number, inp: PlanInput, scaleOther?: (dv: number) => Body) {
+/** Smallest along-track burn at time t that brings Pc below target (and miss above missMin). */
+function minimalBurn(kep: Kep, sb: Body, t: number, inp: PlanInput, scaleOther?: (dv: number) => Body, pcTarget = PC_TARGET, missMin = 0.4) {
   let best: { dvT: number; res: NonNullable<ReturnType<typeof evaluate>> } | null = null;
   for (const sign of [1, -1]) {
     for (const cms of DV_GRID_CMS) {
       const dvT = (sign * cms) / 1e5; // km/s
       const k2 = applyBurn(kep, t, [0, dvT, 0]);
       const res = evaluate(k2, scaleOther ? scaleOther(dvT) : sb, inp);
-      if (res && res.pc < PC_TARGET && res.missKm > 0.4) {
+      if (res && res.pc < pcTarget && res.missKm > missMin) {
         if (!best || Math.abs(dvT) < Math.abs(best.dvT)) best = { dvT, res };
         break;
       }
@@ -134,6 +148,27 @@ export function planAvoidance(inp: PlanInput): ManeuverOption[] {
       score: 0,
       recommended: false,
       rationale: '',
+      profiles: [],
+    });
+  });
+
+  // 1b. Extra-margin variants of our own burn (candidates for the "Safest" profile).
+  primLeads.forEach((t, k) => {
+    const m = minimalBurn(inp.primary.kep, inp.secondary.body, t, inp, undefined, PC_SAFE, MISS_SAFE_KM);
+    if (!m) return;
+    const burn = burnFor(pb, inp.primary.kep, t, m.dvT);
+    opts.push({
+      id: `safe-${k}`,
+      label: `${pb.name} ${m.dvT > 0 ? 'posigrade' : 'retrograde'} burn · extra margin`,
+      strategy: 'own',
+      burns: [burn],
+      result: m.res,
+      totalDvMs: burn.dvMs,
+      recoveryDvMs: burn.dvMs,
+      score: 0,
+      recommended: false,
+      rationale: '',
+      profiles: [],
     });
   });
 
@@ -157,6 +192,7 @@ export function planAvoidance(inp: PlanInput): ManeuverOption[] {
         score: 0,
         recommended: false,
         rationale: '',
+        profiles: [],
       });
     });
     // Shared: both burn at the same lead, opposite along-track directions, split by weight.
@@ -187,6 +223,7 @@ export function planAvoidance(inp: PlanInput): ManeuverOption[] {
               score: 0,
               recommended: false,
               rationale: '',
+              profiles: [],
             };
             break;
           }
@@ -214,7 +251,16 @@ export function planAvoidance(inp: PlanInput): ManeuverOption[] {
       ? 'Lowest combined cost for both missions: Δv is split so the satellite with more propellant margin and lower mission priority takes the larger share, and both operators keep their service windows.'
       : 'Smallest Δv that brings Pc below 1e-6 while leaving at least one orbit between burn and TCA for command upload and verification.';
   }
-  return opts.slice(0, 5);
+  // Profiles: tag the winner of each, then keep the tagged options first so all of them are always shown.
+  if (pick) pick.profiles.push('balanced');
+  const prop = (o: ManeuverOption) => o.burns.reduce((t, b) => t + b.propellantG, 0);
+  const first = (o: ManeuverOption) => Math.min(...o.burns.map((b) => b.time));
+  const winner = (better: (a: ManeuverOption, b: ManeuverOption) => boolean) => opts.reduce<ManeuverOption | undefined>((w, o) => (!w || better(o, w) ? o : w), undefined);
+  winner((a, b) => prop(a) < prop(b) - 1e-9)?.profiles.push('fuel');
+  winner((a, b) => a.result.pc < b.result.pc * 0.999 || (a.result.pc <= b.result.pc * 1.001 && a.result.missKm > b.result.missKm))?.profiles.push('safe');
+  winner((a, b) => first(a) < first(b) || (first(a) === first(b) && prop(a) < prop(b)))?.profiles.push('lead');
+  const tagged = opts.filter((o) => o.profiles.length);
+  return [...tagged, ...opts.filter((o) => !o.profiles.length)].slice(0, Math.max(5, tagged.length));
 }
 
 function weight(b: SatBudget) {

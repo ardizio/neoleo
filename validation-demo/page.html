@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeoLEO · Validation on real data</title>
+<style>
+  :root { --navy: #13235b; --ember: #f26b1d; --ink: #1b2236; --muted: #667089; --line: #e3e6ee; --ok: #1a8f4c; --bad: #c62828; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; color: var(--ink); background: #f6f7fa; }
+  header { background: var(--navy); color: #fff; padding: 22px 24px; }
+  header h1 { margin: 0; font-size: 22px; } header p { margin: 4px 0 0; opacity: .8; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+  section { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; margin: 14px 0; }
+  h2 { margin: 0 0 4px; font-size: 18px; } .lead { color: var(--muted); margin: 0 0 12px; }
+  button, .btn { background: var(--navy); color: #fff; border: 0; border-radius: 6px; padding: 10px 16px; font: inherit; font-weight: 600; cursor: pointer; }
+  .btn.ghost { background: #fff; color: var(--navy); border: 1px solid var(--navy); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .sum { margin: 12px 0; } .ok { color: var(--ok); } .bad { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; } th, td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; }
+  td.n, th.n { text-align: right; font-family: ui-monospace, Menlo, monospace; white-space: nowrap; }
+  .scroll { max-height: 360px; overflow: auto; }
+  textarea { width: 100%; height: 120px; font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 8px; margin-top: 10px; }
+  #own-out { margin-top: 10px; min-height: 1.5em; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .tile { background: #f6f7fa; border-radius: 8px; padding: 12px; } .tile b { display: block; font-size: 24px; font-family: ui-monospace, Menlo, monospace; }
+  .tile span { color: var(--muted); font-size: 13px; } .tile.warn b { color: var(--ember); }
+  footer { color: var(--muted); font-size: 12px; padding: 0 16px 24px; max-width: 900px; margin: 0 auto; }
+</style></head>
+<body>
+<header><h1>NeoLEO · Validation on real data</h1><p>Runs offline in this page. Same Pc code as the NeoLEO app.</p></header>
+<main>
+  <section>
+    <h2>1 · Collision probability vs NASA</h2>
+    <p class="lead">53 real conjunction messages (CDMs) from NASA's conjunction assessment team (CARA), each with NASA's official Pc. NeoLEO recomputes every one from the raw states and covariances.</p>
+    <button id="cara-run">Recompute all 53</button>
+    <div id="cara-out" hidden>
+      <p class="sum" id="cara-sum"></p>
+      <div class="scroll"><table><thead><tr><th>Objects</th><th>TCA</th><th class="n">NASA Pc</th><th class="n">NeoLEO Pc</th><th class="n">Gap</th></tr></thead><tbody id="cara-body"></tbody></table></div>
+    </div>
+  </section>
+  <section>
+    <h2>2 · Try any CDM</h2>
+    <p class="lead">Paste or open a CDM (KVN with full covariance and an HBR line). NeoLEO's Pc is shown next to the one in the message.</p>
+    <div class="row"><button id="own-sample" class="btn ghost">Load Hubble × Delta 2 R/B (2021)</button><label class="btn ghost">Open .cdm<input id="own-file" type="file" accept=".cdm,.txt,.kvn" hidden></label></div>
+    <textarea id="own-text" placeholder="CCSDS_CDM_VERS = 1.0 …" spellcheck="false"></textarea>
+    <div id="own-out"></div>
+  </section>
+  <section>
+    <h2>3 · How good are today's warnings?</h2>
+    <p class="lead">2,167 real conjunction events from ESA (2015–2019). For each, we take the last CDM available 2 days before closest approach, apply NeoLEO's alert thresholds (Pc ≥ 1e-5), and compare with the final CDM.</p>
+    <button id="esa-run">Run back-test</button>
+    <div id="esa-out" hidden><div class="tiles sum" id="esa-sum"></div>
+      <p class="lead">Two days out, today's data misses about 1 in 3 high-risk events, and almost half of its alerts are false. That is the gap NeoLEO's fusion with operator data targets.</p></div>
+  </section>
+</main>
+<footer>Data: NASA CARA Analysis Tools, PcTestCaseCDMs (NASA Open Source Agreement), github.com/nasa/CARA_Analysis_Tools · ESA Kelvins Collision Avoidance Challenge dataset, test set (CC BY 4.0), zenodo.org/records/4463683. Demo created for the SVST hackathon.</footer>
+<script>/*BUNDLE*/</script>
+</body></html>

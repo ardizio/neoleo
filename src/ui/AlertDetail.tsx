@@ -1,4 +1,5 @@
 import { clock, store, useStore } from '../state/store';
+import { Term } from './Term';
 import { latest, type Alert, type CdmRecord } from '../sim/alerts';
 import { SEVERITY_LABEL, formatPc } from '../orbit/pc';
 import { DATA_SOURCES, flag } from '../data/company';
@@ -44,11 +45,11 @@ export function AlertDetail() {
           </div>
           <div className="d-tca">
             <div>
-              <div className="m-label">Time to closest approach</div>
+              <Term label="Time to closest approach" />
               <div className={`d-count mono ${c.severity}`}>{countdown(a.tca - now)}</div>
             </div>
             <div className="d-tca-utc">
-              <div className="m-label">TCA</div>
+              <Term label="TCA" />
               <div className="mono">{utc(a.tca, true)} UTC</div>
               <button className="link-btn" onClick={() => { store.openAlert(null); store.openAlert(a.id); }}>
                 <IconTarget size={14} /> Focus on globe
@@ -97,7 +98,7 @@ export function AlertDetail() {
         </section>
 
         <section className="card">
-          <div className="card-title">CDM history <span className="muted">· CCSDS 508.0-B-1</span></div>
+          <div className="card-title"><Term label="CDM history" className="card-term" /> <span className="muted">· CCSDS 508.0-B-1</span></div>
           <CdmHistory a={a} />
           {a.pendingPlan.length > 0 && <div className="hint">Further tracking updates expected from the data feeds.</div>}
         </section>
@@ -121,7 +122,7 @@ function ObjChip({ name, sub, kind }: { name: string; sub: string; kind: string 
 function Metric({ label, value, strong, trend }: { label: string; value: string; strong?: boolean; trend?: number[] }) {
   return (
     <div className={`metric ${strong ? 'strong' : ''}`}>
-      <div className="m-label">{label}</div>
+      <Term label={label} />
       <div className="m-val mono">{value}</div>
       {trend && trend.length > 1 && <Spark values={trend} />}
     </div>

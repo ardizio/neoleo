@@ -1,3 +1,4 @@
+import { encounter } from './pc';
 // CCSDS 508.0-B-1 Conjunction Data Message, KVN encoding (subset used by
 // the platform: header, relative metadata and both object blocks).
 import type { Vec3 } from './vec';
@@ -118,18 +119,21 @@ export function toKvn(c: CdmData): string {
 export interface ParsedCdm {
   header: Record<string, string>;
   objects: Record<string, string>[];
+  /** Non-empty lines that are not KEY = VALUE (reported by validation). */
+  unparsed?: string[];
 }
 
 /** Minimal KVN reader: returns header keys and per-object key/values (units stripped). */
 export function parseKvn(text: string): ParsedCdm {
   const header: Record<string, string> = {};
   const objects: Record<string, string>[] = [];
+  const unparsed: string[] = [];
   let cur: Record<string, string> | null = null;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('COMMENT')) continue;
     const m = line.match(/^([A-Z0-9_]+)\s*=\s*(.*?)\s*(\[.*\])?$/);
-    if (!m) continue;
+    if (!m) { unparsed.push(line); continue; }
     const [, key, val] = m;
     if (key === 'OBJECT') {
       cur = { OBJECT: val };
@@ -138,7 +142,47 @@ export function parseKvn(text: string): ParsedCdm {
     }
     (cur ?? header)[key] = val;
   }
-  return { header, objects };
+  return { header, objects, unparsed };
+}
+
+export interface CdmCheck { label: string; level: 'ok' | 'warn' | 'error'; detail: string }
+
+/**
+ * Structural and sanity checks of a KVN CDM against CCSDS 508.0-B-1 essentials, before anything is ingested.
+ * Errors block ingest; warnings are shown but allowed.
+ */
+export function validateCdm(text: string): { checks: CdmCheck[]; parsed: ParsedCdm; ok: boolean } {
+  const parsed = parseKvn(text);
+  const { header: h, objects } = parsed;
+  const checks: CdmCheck[] = [];
+  const add = (label: string, level: CdmCheck['level'], detail: string) => checks.push({ label, level, detail });
+  const num = (v?: string) => (v === undefined || v === '' ? NaN : Number(v));
+  const date = (v?: string) => (v ? Date.parse(v.endsWith('Z') ? v : v + 'Z') : NaN);
+
+  add('Format', h.CCSDS_CDM_VERS ? 'ok' : 'error', h.CCSDS_CDM_VERS ? `CCSDS CDM version ${h.CCSDS_CDM_VERS}` : 'CCSDS_CDM_VERS missing: not a KVN CDM');
+  const missingHdr = ['CREATION_DATE', 'ORIGINATOR', 'MESSAGE_ID'].filter((k) => !h[k]);
+  add('Header', missingHdr.length ? 'warn' : 'ok', missingHdr.length ? `Missing ${missingHdr.join(', ')}` : `${h.MESSAGE_ID} from ${h.ORIGINATOR}`);
+  const tca = date(h.TCA);
+  add('Time of closest approach', !Number.isFinite(tca) ? 'error' : tca < Date.now() - 3600e3 ? 'warn' : 'ok',
+    !Number.isFinite(tca) ? 'TCA missing or not an ISO date' : tca < Date.now() - 3600e3 ? `${h.TCA} is in the past` : `${h.TCA} UTC`);
+  const miss = num(h.MISS_DISTANCE);
+  add('Miss distance', Number.isFinite(miss) && miss >= 0 ? 'ok' : 'error', Number.isFinite(miss) && miss >= 0 ? `${miss} m` : 'MISS_DISTANCE missing or invalid');
+  const pc = num(h.COLLISION_PROBABILITY);
+  add('Collision probability', !Number.isFinite(pc) ? 'warn' : pc >= 0 && pc <= 1 ? 'ok' : 'error',
+    !Number.isFinite(pc) ? 'Not given: NeoLEO will compute it' : pc >= 0 && pc <= 1 ? String(h.COLLISION_PROBABILITY) : `${pc} is outside 0–1`);
+  add('Objects', objects.length === 2 ? 'ok' : 'error', objects.length === 2 ? 'OBJECT1 and OBJECT2 present' : `Expected 2 object blocks, found ${objects.length}`);
+  objects.slice(0, 2).forEach((o, i) => {
+    const tag = `Object ${i + 1}`;
+    add(`${tag} identity`, o.OBJECT_DESIGNATOR ? 'ok' : 'error', o.OBJECT_DESIGNATOR ? `${o.OBJECT_DESIGNATOR} · ${o.OBJECT_NAME ?? 'no name'}` : 'OBJECT_DESIGNATOR missing');
+    const sv = ['X', 'Y', 'Z', 'X_DOT', 'Y_DOT', 'Z_DOT'].map((k) => num(o[k]));
+    const r = Math.hypot(sv[0], sv[1], sv[2]);
+    add(`${tag} state vector`, !sv.every(Number.isFinite) ? 'error' : r < 6378 || r > 50000 ? 'warn' : 'ok',
+      !sv.every(Number.isFinite) ? 'X…Z_DOT missing or not numeric' : `|r| = ${r.toFixed(0)} km${r < 6378 || r > 50000 ? ' (implausible)' : ''}, frame ${o.REF_FRAME ?? '?'}`);
+    const cov = ['CR_R', 'CT_T', 'CN_N'].map((k) => num(o[k]));
+    add(`${tag} covariance`, cov.every((v) => v > 0) ? 'ok' : 'warn', cov.every((v) => v > 0) ? `σR ${Math.sqrt(cov[0]).toFixed(0)} m · σT ${Math.sqrt(cov[1]).toFixed(0)} m · σN ${Math.sqrt(cov[2]).toFixed(0)} m` : 'Diagonal RTN covariance missing: default uncertainty will be used');
+  });
+  if (parsed.unparsed?.length) add('Unrecognised lines', 'warn', `${parsed.unparsed.length} line(s) ignored, e.g. "${parsed.unparsed[0].slice(0, 40)}"`);
+  return { checks, parsed, ok: !checks.some((c) => c.level === 'error') };
 }
 
 export interface CdmSummary {
@@ -169,4 +213,26 @@ export function summarize(p: ParsedCdm): CdmSummary {
     obj1: obj(p.objects[0]),
     obj2: obj(p.objects[1]),
   };
+}
+
+/**
+ * Recompute the 2D Pc from a CDM's own states and full RTN position covariances (EME2000 / inertial states).
+ * HBR from the argument, else the CDM's `COMMENT HBR = x [m]` line. Returns null when inputs are missing.
+ */
+export function pcFromCdm(text: string, hbrM?: number): number | null {
+  const { objects } = parseKvn(text);
+  if (objects.length < 2) return null;
+  const hbr = hbrM ?? Number(text.match(/COMMENT\s+HBR\s*=\s*([\d.eE+-]+)/)?.[1]);
+  if (!(hbr > 0)) return null;
+  const n = (o: Record<string, string>, k: string) => Number(o[k]);
+  const st = (o: Record<string, string>) => ({
+    r: ['X', 'Y', 'Z'].map((k) => n(o, k)) as Vec3,
+    v: ['X_DOT', 'Y_DOT', 'Z_DOT'].map((k) => n(o, k)) as Vec3,
+    // m^2 -> km^2
+    C: [['CR_R', 'CT_R', 'CN_R'], ['CT_R', 'CT_T', 'CN_T'], ['CN_R', 'CN_T', 'CN_N']].map((row) => row.map((k) => n(o, k) * 1e-6)),
+  });
+  const a = st(objects[0]), b = st(objects[1]);
+  const vals = [...a.r, ...a.v, ...b.r, ...b.v, ...a.C.flat(), ...b.C.flat()];
+  if (!vals.every(Number.isFinite)) return null;
+  return encounter(a.r, a.v, b.r, b.v, a.C, b.C, hbr / 1000).pc;
 }

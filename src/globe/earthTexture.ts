@@ -12,11 +12,11 @@ export interface EarthPalette {
 }
 
 export const LIGHT_EARTH: EarthPalette = {
-  ocean: '#e3eaf3',
-  land: '#fbfcfe',
-  border: '#d3dbe6',
-  coast: '#b9c5d4',
-  graticule: 'rgba(120, 140, 170, 0.16)',
+  ocean: '#E3E7F0',
+  land: '#FBFAF7',
+  border: '#D9DCE6',
+  coast: '#A9B0C6',
+  graticule: 'rgba(20, 39, 94, 0.10)',
 };
 
 /** Equirectangular canvas texture of the Earth in a flat, light style. */

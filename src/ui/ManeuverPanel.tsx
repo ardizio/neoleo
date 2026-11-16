@@ -1,7 +1,7 @@
 import { clock, PLAN_STEPS_JOINT, PLAN_STEPS_SINGLE, store, useStore } from '../state/store';
 import { latest, type Alert } from '../sim/alerts';
 import { formatPc } from '../orbit/pc';
-import { PC_TARGET, type ManeuverOption } from '../orbit/maneuver';
+import { PC_TARGET, PROFILE_INFO, type ManeuverOption, type Profile } from '../orbit/maneuver';
 import { ORG, PARTNER_ORG } from '../data/company';
 import { cms, countdown, meters, utc } from './format';
 import { IconCheck, IconDownload, IconLink, IconSpark } from './icons';
@@ -81,7 +81,12 @@ export function ManeuverPanel({ alert: a }: { alert: Alert }) {
       </div>
       {chosen && (
         <>
-          {chosen.recommended && chosen.rationale && <div className="rationale"><strong>Why this option:</strong> {chosen.rationale}</div>}
+          {chosen.profiles.length > 0 && (
+            <div className="rationale">
+              <strong>Why this option:</strong>{' '}
+              {chosen.recommended && chosen.rationale ? chosen.rationale : chosen.profiles.map((p) => PROFILE_INFO[p].why).join(' ')}
+            </div>
+          )}
           <div className={`check ${plan.check?.status ?? 'running'}`}>
             {plan.check?.status === 'running' && <><span className="spinner" /> Post-maneuver screening of the new orbit against the catalog (24 h)…</>}
             {plan.check?.status === 'clear' && <><IconCheck size={14} /> Post-maneuver screening: no new close approaches under 1 km in 24 h.</>}
@@ -94,6 +99,8 @@ export function ManeuverPanel({ alert: a }: { alert: Alert }) {
   );
 }
 
+const PROFILE_ICON: Record<Profile, string> = { balanced: '★', fuel: '⛽', safe: '🛡', lead: '⏱' };
+
 function OptionRow({ o, tca, selected, disabled, onSelect }: { o: ManeuverOption; tca: number; selected: boolean; disabled: boolean; onSelect: () => void }) {
   const first = Math.min(...o.burns.map((b) => b.time));
   return (
@@ -101,7 +108,7 @@ function OptionRow({ o, tca, selected, disabled, onSelect }: { o: ManeuverOption
       <div className="opt-top">
         <span className="opt-radio" />
         <span className="opt-label">{o.label}</span>
-        {o.recommended && <span className="rec-tag">Recommended</span>}
+        {o.profiles.map((p) => <span key={p} className={`prof-tag ${p}`} title={PROFILE_INFO[p].why}>{PROFILE_ICON[p]} {PROFILE_INFO[p].label}</span>)}
         <span className="opt-lead mono">burn T−{countdown(tca - first)}</span>
       </div>
       <div className="opt-burns">

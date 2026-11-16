@@ -136,3 +136,13 @@ export function shapeOf(o: Pick<CatalogObject, 'kind' | 'name'>): Shape {
 export function objectType(o: Pick<CatalogObject, 'kind' | 'name'>): string {
   return { payload: 'Active payload', debris: 'Debris fragment', rocket: 'Rocket body', defunct: 'Defunct object' }[shapeOf(o)];
 }
+
+/** Type + altitude filter shared by the globe and the Settings counts: orbit (perigee–apogee) must cross [altMin, altMax]. */
+export function objectVisible(
+  o: Pick<CatalogObject, 'kind' | 'name' | 'perigeeKm' | 'apogeeKm'>,
+  l: { payload: boolean; debris: boolean; rocket: boolean; defunct: boolean; altMin: number; altMax: number },
+): boolean {
+  const shape = shapeOf(o);
+  if (!(shape === 'payload' ? l.payload : shape === 'debris' ? l.debris : shape === 'rocket' ? l.rocket : l.defunct)) return false;
+  return o.apogeeKm >= l.altMin && o.perigeeKm <= l.altMax;
+}

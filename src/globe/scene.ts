@@ -6,7 +6,7 @@ import { drawEarthTexture, earthOutlines, LIGHT_EARTH } from './earthTexture';
 import dayUrl from './textures/earth-day.webp';
 import nightUrl from './textures/earth-night.webp';
 import { clock, store, visibleAlerts, type AppState } from '../state/store';
-import { objectType, regimeOf, sgp4State, shapeOf } from '../data/catalog';
+import { objectType, objectVisible, sgp4State, shapeOf } from '../data/catalog';
 import { period, stateAt, RE, type Kep } from '../orbit/kepler';
 import type { Vec3 } from '../orbit/vec';
 import { latest } from '../sim/alerts';
@@ -18,11 +18,11 @@ const toWorld = (r: Vec3 | Float32Array, o = 0, out = new THREE.Vector3()) =>
   out.set(r[o] * SCALE, r[o + 2] * SCALE, -r[o + 1] * SCALE);
 
 export const COLORS = {
-  payload: new THREE.Color('#7b89a1'),
-  debris: new THREE.Color('#ea7a32'),
-  defunct: new THREE.Color('#b0472a'),
-  own: new THREE.Color('#2457ff'),
-  partner: new THREE.Color('#0e9f8c'),
+  payload: new THREE.Color('#2A78D6'),
+  debris: new THREE.Color('#C2368F'),
+  defunct: new THREE.Color('#E87BA4'),
+  own: new THREE.Color('#EE7414'),
+  partner: new THREE.Color('#1BAF7A'),
   critical: new THREE.Color('#e5383b'),
   warning: new THREE.Color('#f08c00'),
 };
@@ -106,7 +106,10 @@ const pointsFragment = /* glsl */ `
   void main() {
     vec2 c = gl_PointCoord - 0.5;
     float disc = 1.0 - smoothstep(0.38, 0.5, length(c));
-    float spin = vKind < 0.5 ? 0.6 : vVar * 1.7 + uTime * (0.25 + 0.1 * vVar);
+    // Per-object tumble: seed in fract(vVar)/0.4. Rates 0.02–0.25 rad/s, either direction, slowed further up close.
+    float seed = fract(vVar) / 0.4;
+    float rate = (0.02 + 0.23 * seed * seed) * (fract(seed * 7.13) < 0.5 ? -1.0 : 1.0) * mix(1.0, 0.4, vNear);
+    float spin = vKind < 0.5 ? 0.6 : seed * 6.2832 + uTime * rate + 0.15 * sin(uTime * (0.3 + seed));
     vec2 q = rot(c, spin);
     vec2 g;
     if (vKind < 0.5) g = satellite(q, vVar);
@@ -190,11 +193,10 @@ const earthFragment = /* glsl */ `
     gl_FragColor = vec4(col, 1.0);
   }
 `;
-// Photoreal: NASA Blue Marble by day, Black Marble city lights by night, sun glint on oceans.
+// Photoreal: NASA Blue Marble by day, Black Marble city lights by night (no sun glint: it read as a glare spot).
 const photoFragment = /* glsl */ `
   uniform sampler2D uDay;
   uniform sampler2D uNight;
-  uniform sampler2D uLand;
   uniform vec3 uSun;
   varying vec2 vUv;
   varying vec3 vNormalW;
@@ -209,9 +211,6 @@ const photoFragment = /* glsl */ `
     vec3 lights = texture2D(uNight, vUv).rgb;
     vec3 nightCol = dayCol * 0.05 + lights * vec3(1.0, 0.80, 0.52) * 1.4;
     vec3 col = mix(nightCol, dayCol, day);
-    float ocean = 1.0 - texture2D(uLand, vUv).r;
-    float spec = pow(max(dot(n, normalize(l + v)), 0.0), 160.0);
-    col += vec3(0.95, 0.90, 0.80) * spec * 0.35 * ocean * day;
     float fres = pow(1.0 - max(dot(n, v), 0.0), 3.0);
     col = mix(col, vec3(0.32, 0.58, 1.0), fres * 0.55 * smoothstep(-0.3, 0.3, ndl));
     gl_FragColor = vec4(col, 1.0);
@@ -260,17 +259,25 @@ export class GlobeScene {
   tcaMarker: THREE.Sprite;
   tooltip: HTMLDivElement;
   private lastVersion = -1;
-  private lastSpeed = 1;
   private lastRequest = 0;
+  private lastWall = 0;
+  private lastSim = 0;
+  private tumbleT = 0;
   private catalogT = 0;
   private raf = 0;
   private lastState: AppState | null = null;
   private fly: { from: THREE.Vector3; to: THREE.Vector3; d0: number; d1: number; t0: number; dur: number } | null = null;
   private down: { x: number; y: number; t: number } | null = null;
+  /** Active drag: the Earth-fixed point grabbed under the finger (null when the finger started in space). */
+  private grab: { id: number; local: THREE.Vector3 | null; x: number; y: number; moved: boolean } | null = null;
+  private pointers = new Set<number>();
+  private dragRay = new THREE.Raycaster();
+  private unitSphere = new THREE.Sphere(new THREE.Vector3(), 1);
   private unsub: () => void;
   private resizeObs: ResizeObserver;
   private focusKey = '';
   private selectionKey = '';
+  private colorKey = '';
   private fleetKepKey = '';
   private layerKey = '';
   private hoverAt = 0;
@@ -290,9 +297,12 @@ export class GlobeScene {
     this.camera = new THREE.PerspectiveCamera(38, 1, 0.01, 400);
     this.camera.position.set(0.9, 1.4, 3.9).normalize().multiplyScalar(4.4);
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
+    // One-finger / mouse drag is our own "grab" rotation (see onDragMove); OrbitControls only zooms (wheel, pinch) and auto-rotates.
+    // No damping: the globe stops the moment the finger lifts instead of drifting.
+    this.controls.enableDamping = false;
+    this.controls.enableRotate = false;
     this.controls.enablePan = false;
+    this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     this.controls.minDistance = 1.25;
     this.controls.maxDistance = 22;
     this.controls.rotateSpeed = 0.55;
@@ -346,7 +356,7 @@ export class GlobeScene {
     this.fleetPoints.renderOrder = 3;
     this.scene.add(this.fleetOrbitGroup, this.focusGroup, this.fleetPoints);
 
-    this.selectionMarker = this.makeRingSprite('#1d2433', 1);
+    this.selectionMarker = this.makeRingSprite('#14275E', 1);
     this.tcaMarker = this.makeRingSprite('#e5383b', 2);
     this.scene.add(this.selectionMarker, this.tcaMarker);
 
@@ -355,12 +365,27 @@ export class GlobeScene {
     this.resize();
 
     const el = this.renderer.domElement;
-    el.addEventListener('pointerdown', (e) => (this.down = { x: e.clientX, y: e.clientY, t: performance.now() }));
+    el.addEventListener('pointerdown', (e) => {
+      this.down = { x: e.clientX, y: e.clientY, t: performance.now() };
+      this.pointers.add(e.pointerId);
+      if (this.pointers.size !== 1 || e.button > 0) { this.grab = null; return; } // pinch / right button: zoom only
+      const hit = this.hitEarth(e);
+      this.grab = { id: e.pointerId, local: hit ? this.earthGroup.worldToLocal(hit) : null, x: e.clientX, y: e.clientY, moved: false };
+    });
+    const release = (e: PointerEvent) => {
+      this.pointers.delete(e.pointerId);
+      if (this.grab?.id === e.pointerId) this.grab = null;
+    };
     el.addEventListener('pointerup', (e) => {
       if (this.down && Math.hypot(e.clientX - this.down.x, e.clientY - this.down.y) < 5) this.onClick(e);
       this.down = null;
+      release(e);
     });
-    el.addEventListener('pointermove', (e) => this.onHover(e));
+    el.addEventListener('pointercancel', release);
+    el.addEventListener('pointermove', (e) => {
+      if (this.grab && e.pointerId === this.grab.id && this.pointers.size === 1) this.onDragMove(e);
+      else this.onHover(e);
+    });
     el.addEventListener('pointerleave', () => (this.tooltip.style.opacity = '0'));
 
     this.unsub = store.subscribe(() => this.sync());
@@ -429,8 +454,8 @@ export class GlobeScene {
       return new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
     };
     const g = new THREE.Group();
-    g.add(new THREE.LineSegments(seg(coast), new THREE.LineBasicMaterial({ color: '#97a8be' })));
-    g.add(new THREE.LineSegments(seg(borders), new THREE.LineBasicMaterial({ color: '#c3cdda' })));
+    g.add(new THREE.LineSegments(seg(coast), new THREE.LineBasicMaterial({ color: '#A9B0C6' })));
+    g.add(new THREE.LineSegments(seg(borders), new THREE.LineBasicMaterial({ color: '#D9DCE6' })));
     return g;
   }
 
@@ -443,12 +468,8 @@ export class GlobeScene {
       t.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
       return t;
     };
-    // Land mask from the same Natural Earth outlines: white land, black ocean (drives sun glint).
-    const land = new THREE.CanvasTexture(
-      drawEarthTexture(2048, { ocean: '#000', land: '#fff', border: '#fff', coast: '#fff', graticule: 'rgba(0,0,0,0)' }),
-    );
     this.photoMat = new THREE.ShaderMaterial({
-      uniforms: { uDay: { value: load(dayUrl) }, uNight: { value: load(nightUrl) }, uLand: { value: land }, uSun: { value: this.sunUniform } },
+      uniforms: { uDay: { value: load(dayUrl) }, uNight: { value: load(nightUrl) }, uSun: { value: this.sunUniform } },
       vertexShader: earthVertex,
       fragmentShader: photoFragment,
     });
@@ -460,16 +481,16 @@ export class GlobeScene {
     const s = store.state;
     this.lastState = s;
     this.controls.autoRotate = s.autoRotate;
-    if (s.speed === 0 && this.lastSpeed !== 0) {
-      // Pause: drop the damped rotation still in flight so the globe stops at once.
-      this.controls.enableDamping = false;
-      this.controls.update();
-      this.controls.enableDamping = true;
-    }
-    this.lastSpeed = s.speed;
     this.earth.material = s.earthStyle === 'photo' ? this.photoMaterial() : this.mapMat;
     this.outlines.visible = s.earthStyle === 'map';
     if (s.objects.length && !this.pointsGeo.getAttribute('aColor')) this.initCatalogAttributes(s);
+    const ck = JSON.stringify(s.layers.colors);
+    if (ck !== this.colorKey) {
+      this.colorKey = ck;
+      this.paintCatalog(s);
+      this.fleetKepKey = ''; // rebuild fleet orbit lines in the new colour
+      this.focusKey = this.selectionKey = '\u0000';
+    }
     const lk = JSON.stringify(s.layers);
     if (lk !== this.layerKey && this.pointsGeo.getAttribute('aSize')) {
       this.layerKey = lk;
@@ -502,26 +523,34 @@ export class GlobeScene {
     const n = s.objects.length;
     this.pointsGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     this.pointsGeo.setAttribute('aVel', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
-    const col = new Float32Array(n * 3);
-    s.objects.forEach((o, k) => {
-      const c = o.kind === 'DEBRIS' ? COLORS.debris : o.kind === 'DEFUNCT' ? COLORS.defunct : COLORS.payload;
-      col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
-    });
-    this.pointsGeo.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
+    this.pointsGeo.setAttribute('aColor', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    this.paintCatalog(s);
     const KIND = { payload: 0, debris: 1, defunct: 2, rocket: 3 } as const;
     this.pointsGeo.setAttribute('aKind', new THREE.BufferAttribute(Float32Array.from(s.objects, (o) => KIND[shapeOf(o)]), 1));
-    this.pointsGeo.setAttribute('aVar', new THREE.BufferAttribute(Float32Array.from(s.objects, (o) => o.norad % 4), 1));
+    this.pointsGeo.setAttribute('aVar', new THREE.BufferAttribute(Float32Array.from(s.objects, (o) => (o.norad % 4) + 0.4 * (((o.norad * 2654435761) >>> 0) / 2 ** 32)), 1));
     this.pointsGeo.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(n), 1));
     this.layerKey = '';
+  }
+
+  /** Catalog point colours from the user's colour settings. */
+  private paintCatalog(s: AppState) {
+    const c = s.layers.colors;
+    COLORS.own.set(c.own); COLORS.payload.set(c.payload); COLORS.debris.set(c.debris); COLORS.defunct.set(c.defunct); COLORS.partner.set(c.partner);
+    const attr = this.pointsGeo.getAttribute('aColor') as THREE.BufferAttribute | undefined;
+    if (!attr) return;
+    const col = attr.array as Float32Array;
+    s.objects.forEach((o, k) => {
+      const v = o.kind === 'DEBRIS' ? COLORS.debris : o.kind === 'DEFUNCT' ? COLORS.defunct : COLORS.payload;
+      col[k * 3] = v.r; col[k * 3 + 1] = v.g; col[k * 3 + 2] = v.b;
+    });
+    attr.needsUpdate = true;
   }
 
   private applyLayers(s: AppState) {
     const size = this.pointsGeo.getAttribute('aSize') as THREE.BufferAttribute;
     s.objects.forEach((o, k) => {
       let v = o.kind === 'DEBRIS' ? 2.2 : o.kind === 'DEFUNCT' ? 3.2 : 2.3;
-      if (o.kind === 'PAYLOAD' && !s.layers.payload) v = 0;
-      if (o.kind !== 'PAYLOAD' && !s.layers.debris) v = 0;
-      if (s.layers.regime !== 'ALL' && regimeOf(o) !== s.layers.regime) v = 0;
+      if (!objectVisible(o, s.layers)) v = 0;
       size.setX(k, v);
     });
     size.needsUpdate = true;
@@ -550,7 +579,7 @@ export class GlobeScene {
     this.fleetGeo.setAttribute('aRing', new THREE.BufferAttribute(new Float32Array(n), 1));
     for (const f of this.fleet) {
       if (!f.own) continue;
-      this.fleetOrbitGroup.add(this.orbitLine(f.kep, '#2457ff', 0.16));
+      this.fleetOrbitGroup.add(this.orbitLine(f.kep, `#${COLORS.own.getHexString()}`, 0.22));
     }
   }
 
@@ -583,7 +612,7 @@ export class GlobeScene {
     if (!a) return;
     const sev = a.cdms.length ? latest(a).severity : 'watch';
     const prim = store.fleetOrbit(a.primary.id);
-    if (prim) this.focusGroup.add(this.orbitLine(prim.kep, '#2457ff', 0.95));
+    if (prim) this.focusGroup.add(this.orbitLine(prim.kep, `#${COLORS.own.getHexString()}`, 0.95));
     if (a.secondary.cls === 'PARTNER') {
       const p = store.fleetOrbit(a.secondary.id);
       if (p) this.focusGroup.add(this.orbitLine(p.kep, SEV_COLOR[sev], 0.95));
@@ -606,9 +635,9 @@ export class GlobeScene {
     let line: THREE.Line | null = null;
     if (sel.type === 'fleet') {
       const f = store.fleetOrbit(sel.id);
-      if (f) line = this.orbitLine(f.kep, f.spec.owner === 'own' ? '#2457ff' : '#0e9f8c', 0.8);
+      if (f) line = this.orbitLine(f.kep, `#${(f.spec.owner === 'own' ? COLORS.own : COLORS.partner).getHexString()}`, 0.8);
     } else {
-      line = this.sgp4Line(sel.idx, '#1d2433', 0.55, clock.now());
+      line = this.sgp4Line(sel.idx, '#14275E', 0.6, clock.now());
     }
     if (line) {
       line.userData.selection = true;
@@ -639,6 +668,59 @@ export class GlobeScene {
     const y = py + st.vel[k * 3 + 1] * dt + py * g;
     const z = pz + st.vel[k * 3 + 2] * dt + pz * g;
     return out.set(x * SCALE, z * SCALE, -y * SCALE);
+  }
+
+  private hitEarth(e: PointerEvent): THREE.Vector3 | null {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    this.dragRay.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), this.camera);
+    return this.dragRay.ray.intersectSphere(this.unitSphere, new THREE.Vector3());
+  }
+
+  /** Orbit the camera around the Earth, north kept up. */
+  private orbitBy(dTheta: number, dPhi: number) {
+    const sp = new THREE.Spherical().setFromVector3(this.camera.position);
+    sp.theta += dTheta;
+    sp.phi = THREE.MathUtils.clamp(sp.phi + dPhi, 0.05, Math.PI - 0.05);
+    this.camera.position.setFromSpherical(sp);
+    this.camera.lookAt(0, 0, 0);
+  }
+
+  /**
+   * Grab rotation: the ground point touched at pointer-down stays under the finger (Earth-fixed, so it holds even
+   * while the Earth spins at 600×). Off the globe, the drag maps pixels to the same surface distance.
+   */
+  private onDragMove(e: PointerEvent) {
+    const g = this.grab!;
+    if (!g.moved) {
+      if (Math.hypot(e.clientX - (this.down?.x ?? e.clientX), e.clientY - (this.down?.y ?? e.clientY)) < 4) return;
+      g.moved = true;
+      this.fly = null;
+      this.tooltip.style.opacity = '0';
+      const st = store.state;
+      if (st.autoRotate || st.followSelected) store.set({ autoRotate: false, followSelected: false });
+    }
+    let hit = this.hitEarth(e);
+    if (g.local && hit) {
+      // Spherical deltas are exact only at screen centre; a few refinement passes pin the point under the finger anywhere.
+      const s0 = new THREE.Spherical().setFromVector3(this.earthGroup.localToWorld(g.local.clone()));
+      for (let i = 0; i < 4 && hit; i++) {
+        const s1 = new THREE.Spherical().setFromVector3(hit);
+        const dTheta = THREE.MathUtils.euclideanModulo(s0.theta - s1.theta + Math.PI, 2 * Math.PI) - Math.PI;
+        const dPhi = s0.phi - s1.phi;
+        if (Math.abs(dTheta) + Math.abs(dPhi) < 1e-5) break;
+        this.orbitBy(dTheta, dPhi);
+        this.camera.updateMatrixWorld();
+        hit = this.hitEarth(e);
+      }
+    } else {
+      const h = this.renderer.domElement.clientHeight || 1;
+      const k = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * Math.max(this.camera.position.length() - 1, 0.05)) / h;
+      this.orbitBy(-(e.clientX - g.x) * k, -(e.clientY - g.y) * k);
+      const again = this.hitEarth(e);
+      if (again) g.local = this.earthGroup.worldToLocal(again); // finger reached the globe: grab it from here on
+    }
+    g.x = e.clientX;
+    g.y = e.clientY;
   }
 
   flyTo(target: THREE.Vector3, dist: number) {
@@ -693,8 +775,11 @@ export class GlobeScene {
 
     this.updateFleet(now);
     this.fleetMat.uniforms.uTime.value = wallNow / 1000;
-    // Debris tumbling follows simulation time, so it freezes when paused.
-    this.pointsMat.uniforms.uTime.value = (now % 3.6e6) / 1000;
+    // Tumble clock: real-time rate whatever the sim speed, frozen when paused, backwards on rewind.
+    const wallDt = (wallNow - this.lastWall) / 1000, simDt = (now - this.lastSim) / 1000;
+    this.lastWall = wallNow; this.lastSim = now;
+    if (wallDt > 0 && wallDt < 1) this.tumbleT += Math.max(-wallDt, Math.min(wallDt, simDt));
+    this.pointsMat.uniforms.uTime.value = this.tumbleT;
 
     // selection marker follows object
     const sp = this.selectedPosition();

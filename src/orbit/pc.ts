@@ -21,13 +21,19 @@ export interface EncounterGeometry {
 
 type Mat3 = number[][];
 
-function covInertial(r: Vec3, v: Vec3, s: SigmaRtn): Mat3 {
+/** Full 3x3 position covariance in the object's RTN frame, km^2 (as in a CDM: CR_R, CT_R, CT_T, …). */
+export type CovRtn = Mat3;
+
+const diag = (s: SigmaRtn): CovRtn => [[s[0] ** 2, 0, 0], [0, s[1] ** 2, 0], [0, 0, s[2] ** 2]];
+
+/** RTN covariance -> inertial: C = Bᵀ · C_rtn · B. */
+function covInertial(r: Vec3, v: Vec3, Crtn: CovRtn): Mat3 {
   const B = rtnBasis(r, v); // rows: R, T, N
   const C: Mat3 = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
   for (let a = 0; a < 3; a++)
     for (let b = 0; b < 3; b++) {
       let sum = 0;
-      for (let k = 0; k < 3; k++) sum += B[k][a] * B[k][b] * s[k] * s[k];
+      for (let k = 0; k < 3; k++) for (let l = 0; l < 3; l++) sum += B[k][a] * Crtn[k][l] * B[l][b];
       C[a][b] = sum;
     }
   return C;
@@ -46,7 +52,7 @@ const quad = (C: Mat3, x: Vec3, y: Vec3) => {
  */
 export function encounter(
   rp: Vec3, vp: Vec3, rs: Vec3, vs: Vec3,
-  sigP: SigmaRtn, sigS: SigmaRtn, hbrKm: number,
+  sigP: SigmaRtn | CovRtn, sigS: SigmaRtn | CovRtn, hbrKm: number,
 ): EncounterGeometry {
   const dr = sub(rs, rp);
   const dv = sub(vs, vp);
@@ -60,8 +66,9 @@ export function encounter(
   const bx = dot(dr, ex);
   const by = dot(dr, ey);
 
-  const Cp = covInertial(rp, vp, sigP);
-  const Cs = covInertial(rs, vs, sigS);
+  const asCov = (x: SigmaRtn | CovRtn) => (Array.isArray(x[0]) ? (x as CovRtn) : diag(x as SigmaRtn));
+  const Cp = covInertial(rp, vp, asCov(sigP));
+  const Cs = covInertial(rs, vs, asCov(sigS));
   const C: Mat3 = Cp.map((row, a) => row.map((val, b) => val + Cs[a][b]));
   const sxx = quad(C, ex, ex), sxy = quad(C, ex, ey), syy = quad(C, ey, ey);
 

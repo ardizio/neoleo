@@ -5,7 +5,7 @@ import { FleetPanel } from './ui/FleetPanel';
 import { AlertsPanel } from './ui/AlertsPanel';
 import { GlobeView } from './ui/GlobeView';
 import { Modals } from './ui/Overlays';
-import { IconAlert, IconDb, IconSat, LogoMark } from './ui/icons';
+import { LogoMark, TabAlerts, TabData, TabFleet, TabGlobe } from './ui/icons';
 import { ORG, PLATFORM } from './data/company';
 
 let booted = false;
@@ -55,17 +55,17 @@ function MobileNav() {
   const s = useStore();
   const tab = (id: AppState['mobileTab'], label: string, icon: React.ReactNode) => (
     <button className={s.mobileTab === id && !s.modal ? 'on' : ''} onClick={() => store.set({ mobileTab: id, modal: null })} aria-current={s.mobileTab === id}>
-      {icon}
+      <span className="mnav-pill">{icon}</span>
       <span>{label}</span>
     </button>
   );
   return (
     <nav className="mobile-nav" aria-label="Sections">
-      {tab('globe', 'Globe', <span className="mnav-globe" />)}
-      {tab('alerts', 'Alerts', <IconAlert size={20} />)}
-      {tab('fleet', 'Fleet', <IconSat size={20} />)}
+      {tab('globe', 'Globe', <TabGlobe size={22} />)}
+      {tab('alerts', 'Alerts', <TabAlerts size={22} />)}
+      {tab('fleet', 'Fleet', <TabFleet size={22} />)}
       <button className={s.modal === 'sources' ? 'on' : ''} onClick={() => store.set({ modal: 'sources' })}>
-        <IconDb size={20} />
+        <span className="mnav-pill"><TabData size={22} /></span>
         <span>Data</span>
       </button>
     </nav>
